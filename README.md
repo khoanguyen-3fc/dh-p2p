@@ -87,4 +87,46 @@ graph LR
 
 Following the P2P handshake, the script begins to listen for RTSP connections on port 554. Upon a client's connection, the script initiates a new realm within the PTCP protocol. Essentially, this script serves as a tunnel between the client and the device, facilitating communication through PTCP encapsulation.
 
+### P2P handshake
+
+```mermaid
+sequenceDiagram
+  participant A as This script
+  participant B as Easy4IPCloud
+  participant C1 as P2P Server
+  participant C2 as Relay Server
+  participant C3 as Agent Server
+  participant D as Camera/NVR
+
+  A->>B: /probe/p2psrv
+  A->>B: /online/p2psrv/{SN}
+  B-->>A: p2psrv info
+
+  A->>C1: /probe/device/{SN}
+
+  A->>B: /online/relay
+  B-->>A: relay info
+
+  A->>B: /device/{SN}/p2p-channel (*)
+
+  A->>C2: /relay/agent
+  C2-->>A: agent info + token
+
+  A->>C3: /relay/start/{token}
+  C3-->>A: device info
+
+  A->>B: /device/{SN}/relay-channel + agent info
+
+  C3-->>A: PTCP SYN
+  A->>C3: PTCP SYN-ACK
+  A->>C3: PTCP request sign
+  C3-->>A: PTCP sign
+
+  A->>D: PTCP handshake (*)
+```
+
+_Note_: Both connections marked with `(*)` and all subsequent connections to the device must use the same UDP local port.
+
+### PTCP protocol
+
 [WIP]
