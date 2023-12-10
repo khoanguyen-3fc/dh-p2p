@@ -80,8 +80,12 @@ The Dahua P2P protocol initiates with a P2P handshake. This process involves loc
 graph LR
   Device[Camera/NVR]
   App[[This script]]
-  Client[RTSP Client]
-  Client -- TCP --> App
+  Client1[RTSP Client 1]
+  Client2[RTSP Client 2]
+  Clientn[RTSP Client n]
+  Client1 -- TCP --> App
+  Client2 -- TCP --> App
+  Clientn -- TCP --> App
   App <-. UDP\nPTCP protocol .-> Device
 ```
 
