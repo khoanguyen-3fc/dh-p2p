@@ -58,4 +58,33 @@ For reverse engineering the protocol, I used [Wireshark](https://www.wireshark.o
 
 For RTSP client, either [VLC](https://www.videolan.org/vlc/) or [ffplay](https://ffmpeg.org/ffplay.html) can be used for easier control of the signals.
 
+### Overview
+
+```mermaid
+graph LR
+  App[[This script]]
+  Service[Easy4IPCloud]
+  Device[Camera/NVR]
+  App -- (1) --> Service
+  Service -- (2) --> Device
+  App <-. (3) .-> Device
+```
+
+The Dahua P2P protocol initiates with a P2P handshake. This process involves locating the device using its Serial Number (SN) via a third-party service, Easy4IPCloud:
+
+1. The script queries the service to retrieve the device's status and IP address.
+2. The service then communicates with the device to prepare it for connection.
+3. Finally, the script establishes a connection with the device.
+
+```mermaid
+graph LR
+  Device[Camera/NVR]
+  App[[This script]]
+  Client[RTSP Client]
+  Client -- TCP --> App
+  App <-. UDP\nPTCP protocol .-> Device
+```
+
+Following the P2P handshake, the script begins to listen for RTSP connections on port 554. Upon a client's connection, the script initiates a new realm within the PTCP protocol. Essentially, this script serves as a tunnel between the client and the device, facilitating communication through PTCP encapsulation.
+
 [WIP]
