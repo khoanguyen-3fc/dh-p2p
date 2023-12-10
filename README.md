@@ -1,4 +1,4 @@
-# RTSP over Dahua P2P (a.k.a. PTCP / PhonyTCP) protocol
+# RTSP Streaming with Dahua P2P Protocol Implementation
 
 This is a proof of concept implementation of RTSP over Dahua P2P protocol. It works with Dahua and derived cameras / NVRs.
 
@@ -127,6 +127,10 @@ sequenceDiagram
 
 _Note_: Both connections marked with `(*)` and all subsequent connections to the device must use the same UDP local port.
 
-### PTCP protocol
+### PTCP (a.k.a. PhonyTCP) protocol
+
+PTCP, also known as PhonyTCP, is a proprietary protocol developed by Dahua. Its primary function is to encapsulate TCP packets within UDP packets. This is particularly useful for creating a tunnel between the client and a device that is situated behind a NAT.
+
+Please note that there is no official documentation available for PTCP. The information provided here is based on reverse engineering.
 
 [WIP]
