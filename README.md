@@ -65,9 +65,9 @@ graph LR
   App[[This script]]
   Service[Easy4IPCloud]
   Device[Camera/NVR]
-  App -- (1) --> Service
-  Service -- (2) --> Device
-  App <-. (3) .-> Device
+  App -- 1 --> Service
+  Service -- 2 --> Device
+  App <-. 3 .-> Device
 ```
 
 The Dahua P2P protocol initiates with a P2P handshake. This process involves locating the device using its Serial Number (SN) via a third-party service, Easy4IPCloud:
