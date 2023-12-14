@@ -103,26 +103,31 @@ sequenceDiagram
   participant D as Camera/NVR
 
   A->>B: /probe/p2psrv
+  B-->>A: 
   A->>B: /online/p2psrv/{SN}
   B-->>A: p2psrv info
 
   A->>C1: /probe/device/{SN}
+  C1-->>A: 
 
   A->>B: /online/relay
   B-->>A: relay info
 
   A->>B: /device/{SN}/p2p-channel (*)
 
-  A->>C2: /relay/agent
-  C2-->>A: agent info + token
+  par
+    A->>C2: /relay/agent
+    C2-->>A: agent info + token
+    A->>C3: /relay/start/{token}
+    C3-->>A: 
+  end
 
-  A->>C3: /relay/start/{token}
-  C3-->>A: device info
+  B-->>A: device info
 
   A->>B: /device/{SN}/relay-channel + agent info
 
-  C3-->>A: PTCP SYN
-  A->>C3: PTCP SYN-ACK
+  C3-->>A: Server Nat Info!
+  A->>C3: PTCP SYN
   A->>C3: PTCP request sign
   C3-->>A: PTCP sign
 
