@@ -4,12 +4,20 @@ This is a proof of concept implementation of RTSP over Dahua P2P protocol. It wo
 
 ## Files
 
+- `src/*.rs` rust implementation
+- `Cargo.toml` - rust dependencies
 - `requirements.txt` - python dependencies
-- `main.py` - main script
+- `main.py` - python implementation - main script
 - `helpers.py` - helper functions
 - `ptcp.lua` - WireShark dissector for Dahua P2P protocol
 
-## Setup
+## Rust implementation
+
+[WIP]
+
+## Python implementation
+
+### Setup
 
 ```bash
 # Create virtual environment
@@ -26,7 +34,7 @@ python main.py [CAMERA_SERIAL]
 ffplay -rtsp_transport tcp -i "rtsp://[username]:[password]@127.0.0.1/cam/realmonitor?channel=1&subtype=0"
 ```
 
-## Usage
+### Usage
 
 `USERNAME` and `PASSWORD` only need for debug mode and `ffplay` is required.
 
@@ -45,7 +53,7 @@ options:
   -d, --debug           Enable debug mode
 ```
 
-## Limitations
+### Limitations
 
 - Single threaded, so only one client can connect at a time
 - Not fully implemented (e.g. only simplex keep-alive, no mulpile connections, etc.)
@@ -103,12 +111,12 @@ sequenceDiagram
   participant D as Camera/NVR
 
   A->>B: /probe/p2psrv
-  B-->>A: 
+  B-->>A:
   A->>B: /online/p2psrv/{SN}
   B-->>A: p2psrv info
 
   A->>C1: /probe/device/{SN}
-  C1-->>A: 
+  C1-->>A:
 
   A->>B: /online/relay
   B-->>A: relay info
@@ -119,7 +127,7 @@ sequenceDiagram
     A->>C2: /relay/agent
     C2-->>A: agent info + token
     A->>C3: /relay/start/{token}
-    C3-->>A: 
+    C3-->>A:
   end
 
   B-->>A: device info
