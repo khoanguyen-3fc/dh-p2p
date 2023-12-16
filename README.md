@@ -4,12 +4,15 @@ This is a proof of concept implementation of RTSP over Dahua P2P protocol. It wo
 
 ## Files
 
-- `src/*.rs` rust implementation
-- `Cargo.toml` - rust dependencies
-- `requirements.txt` - python dependencies
-- `main.py` - python implementation - main script
-- `helpers.py` - helper functions
-- `ptcp.lua` - WireShark dissector for Dahua P2P protocol
+- Rust implementation:
+  - `src/*.rs` rust source files
+  - `Cargo.toml` - rust dependencies
+- Python implementation:
+  - `main.py` - main script
+  - `helpers.py` - helper functions
+  - `requirements.txt` - python dependencies
+- Others:
+  - `ptcp.lua` - WireShark dissector for Dahua P2P protocol
 
 ## Rust implementation
 
@@ -111,12 +114,12 @@ sequenceDiagram
   participant D as Camera/NVR
 
   A->>B: /probe/p2psrv
-  B-->>A:
+  B-->>A: &nbsp;
   A->>B: /online/p2psrv/{SN}
   B-->>A: p2psrv info
 
   A->>C1: /probe/device/{SN}
-  C1-->>A:
+  C1-->>A: &nbsp;
 
   A->>B: /online/relay
   B-->>A: relay info
@@ -127,7 +130,7 @@ sequenceDiagram
     A->>C2: /relay/agent
     C2-->>A: agent info + token
     A->>C3: /relay/start/{token}
-    C3-->>A:
+    C3-->>A: &nbsp;
   end
 
   B-->>A: device info
