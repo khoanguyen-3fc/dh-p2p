@@ -12,27 +12,35 @@ static MAIN_SERVER: &str = "www.easy4ipcloud.com:8800";
 static USERNAME: &str = "P2PClient";
 static USERKEY: &str = "YXQ3Mahe-5H-R1Z_";
 
-static mut CSEQ: u32 = 0;
-
 pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
+    let mut cseq = 0;
+
     socket.connect(MAIN_SERVER).await.unwrap();
 
-    socket.dh_request("/probe/p2psrv", None).await;
+    socket.dh_request("/probe/p2psrv", None, &mut cseq).await;
     socket.dh_read().await;
 
     socket
-        .dh_request(format!("/online/p2psrv/{}", serial).as_ref(), None)
+        .dh_request(
+            format!("/online/p2psrv/{}", serial).as_ref(),
+            None,
+            &mut cseq,
+        )
         .await;
     let p2psrv = &socket.dh_read().await.body.unwrap()["body/US"];
 
-    socket.dh_request("/online/relay", None).await;
+    socket.dh_request("/online/relay", None, &mut cseq).await;
     let relay = &socket.dh_read().await.body.unwrap()["body/Address"];
 
     let socket2 = UdpSocket::bind("0.0.0.0:0").await.unwrap();
     socket2.connect(p2psrv).await.unwrap();
 
     socket2
-        .dh_request(format!("/probe/device/{}", serial).as_ref(), None)
+        .dh_request(
+            format!("/probe/device/{}", serial).as_ref(),
+            None,
+            &mut cseq,
+        )
         .await;
     socket2.dh_read().await;
 
@@ -43,12 +51,13 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
                 "<body><Identify>d4 9e 67 a8 2b d4 7e 1e</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>63.87.143.254,63.87.254.173:{}</LocalAddr><version>5.0.0</version></body>",
                 socket.local_addr().unwrap().port(),
             ).as_ref()),
+            &mut cseq,
         )
         .await;
 
     socket2.connect(relay).await.unwrap();
 
-    socket2.dh_request("/relay/agent", None).await;
+    socket2.dh_request("/relay/agent", None, &mut cseq).await;
     let data = socket2.dh_read().await.body.unwrap();
     let token = &data["body/Token"];
     let agent = &data["body/Agent"];
@@ -59,6 +68,7 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
         .dh_request(
             format!("/relay/start/{}", token).as_ref(),
             Some("<body><Client>:0</Client></body>"),
+            &mut cseq,
         )
         .await;
     socket2.dh_read().await;
@@ -79,6 +89,7 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
         .dh_request(
             format!("/device/{}/relay-channel", serial).as_ref(),
             Some(format!("<body><agentAddr>{}</agentAddr></body>", agent).as_ref()),
+            &mut cseq,
         )
         .await;
 
@@ -294,13 +305,13 @@ impl DHResponse {
 
 #[async_trait]
 trait DHP2P {
-    async fn dh_request(&self, path: &str, body: Option<&str>);
+    async fn dh_request(&self, path: &str, body: Option<&str>, seq: &mut u32);
     async fn dh_read(&self) -> DHResponse;
 }
 
 #[async_trait]
 impl DHP2P for UdpSocket {
-    async fn dh_request(&self, path: &str, body: Option<&str>) {
+    async fn dh_request(&self, path: &str, body: Option<&str>, seq: &mut u32) {
         println!(">>> {}", self.peer_addr().unwrap());
 
         let method = match body {
@@ -325,11 +336,7 @@ impl DHP2P for UdpSocket {
         let hash_digest = hasher.finalize();
         let digest = base64::engine::general_purpose::STANDARD.encode(&hash_digest);
 
-        let seq: u32;
-        unsafe {
-            CSEQ += 1;
-            seq = CSEQ;
-        }
+        *seq += 1;
 
         let req = format!(
         "\
