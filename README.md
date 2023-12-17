@@ -2,17 +2,23 @@
 
 This is a proof of concept implementation of RTSP over Dahua P2P protocol. It works with Dahua and derived cameras / NVRs.
 
+## Motivation
+
+The Dahua P2P protocol is utilized for remote access to Dahua devices. It is commonly used by Dahua apps such as [gDMSS Lite](https://play.google.com/store/apps/details?id=com.mm.android.direct.gdmssphoneLite) on Android or [KBiVMS](https://kbvisiongroup.com/support/download-center.html) on Windows.
+
+In my specific scenario, I have a KBVision CCTV system. Although I can access the cameras using the KBiVMS client, I primarily use non-Windows platforms. Therefore, I wanted to explore alternative options for streaming the video using an RTSP client, which is more widely supported. As a result, I decided to experiment with reimplementing the Dahua P2P protocol.
+
 ## Files
 
 - Rust implementation:
-  - `src/*.rs` rust source files
-  - `Cargo.toml` - rust dependencies
+  - `src/*.rs` - Rust source files
+  - `Cargo.toml` - Rust dependencies
 - Python implementation:
-  - `main.py` - main script
-  - `helpers.py` - helper functions
-  - `requirements.txt` - python dependencies
+  - `main.py` - Main script
+  - `helpers.py` - Helper functions
+  - `requirements.txt` - Python dependencies
 - Others:
-  - `ptcp.lua` - WireShark dissector for Dahua P2P protocol
+  - `ptcp.lua` - Wireshark dissector for Dahua P2P protocol
 
 ## Rust implementation
 
@@ -114,12 +120,12 @@ sequenceDiagram
   participant D as Camera/NVR
 
   A->>B: /probe/p2psrv
-  B-->>A: &nbsp;
+  B-->>A: ;
   A->>B: /online/p2psrv/{SN}
   B-->>A: p2psrv info
 
   A->>C1: /probe/device/{SN}
-  C1-->>A: &nbsp;
+  C1-->>A: ;
 
   A->>B: /online/relay
   B-->>A: relay info
@@ -130,7 +136,7 @@ sequenceDiagram
     A->>C2: /relay/agent
     C2-->>A: agent info + token
     A->>C3: /relay/start/{token}
-    C3-->>A: &nbsp;
+    C3-->>A: ;
   end
 
   B-->>A: device info
