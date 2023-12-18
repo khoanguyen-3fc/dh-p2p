@@ -168,6 +168,14 @@ impl PTCPPacket {
 
         buf
     }
+
+    fn try_print_data(&self) {
+        if let PTCPBody::Payload(p) = &self.body {
+            if p.data.len() > 4 && p.data.iter().all(|b| *b < 0x80) {
+                println!("{}", String::from_utf8_lossy(&p.data));
+            }
+        }
+    }
 }
 
 pub struct PTCPSession {
@@ -260,6 +268,7 @@ impl PTCP for UdpSocket {
     async fn ptcp_request(&self, packet: PTCPPacket) {
         println!(">>> {}", self.peer_addr().unwrap());
         println!("{:?}", packet);
+        packet.try_print_data();
 
         let packet = packet.serialize();
         self.send(&packet).await.unwrap();
@@ -273,6 +282,7 @@ impl PTCP for UdpSocket {
         let n = self.recv(&mut buf).await.unwrap();
         let packet = PTCPPacket::parse(&buf[0..n]);
         println!("{:?}", packet);
+        packet.try_print_data();
         println!("---");
 
         packet
