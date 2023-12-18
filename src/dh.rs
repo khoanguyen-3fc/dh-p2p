@@ -312,8 +312,6 @@ trait DHP2P {
 #[async_trait]
 impl DHP2P for UdpSocket {
     async fn dh_request(&self, path: &str, body: Option<&str>, seq: &mut u32) {
-        println!(">>> {}", self.peer_addr().unwrap());
-
         let method = match body {
             Some(_) => "DHPOST",
             None => "DHGET",
@@ -338,26 +336,29 @@ impl DHP2P for UdpSocket {
 
         *seq += 1;
 
-        let req = format!(
-        "\
-        {} {} HTTP/1.1\r\n\
-        CSeq: {}\r\n\
-        Authorization: WSSE profile=\"UsernameToken\"\r\n\
-        X-WSSE: UsernameToken Username=\"{}\", PasswordDigest=\"{}\", Nonce=\"{}\", Created=\"{}\"\r\n\r\n{}",
-        method, path, seq, USERNAME, digest, nonce, currdate, body,
-    );
+        let req = format!("\
+            {} {} HTTP/1.1\r\n\
+            CSeq: {}\r\n\
+            Authorization: WSSE profile=\"UsernameToken\"\r\n\
+            X-WSSE: UsernameToken Username=\"{}\", PasswordDigest=\"{}\", Nonce=\"{}\", Created=\"{}\"\r\n\r\n{}",
+            method, path, seq, USERNAME, digest, nonce, currdate, body,
+        );
 
+        println!(">>> {}", self.peer_addr().unwrap());
         println!("{}", req);
-        self.send(req.as_bytes()).await.unwrap();
         println!("---");
+
+        self.send(req.as_bytes()).await.unwrap();
     }
 
     async fn dh_read(&self) -> DHResponse {
-        println!("<<< {}", self.peer_addr().unwrap());
+        println!("### {}", self.peer_addr().unwrap());
 
         let mut buf = [0u8; 4096];
         let n = self.recv(&mut buf).await.unwrap();
         let res = String::from_utf8_lossy(&buf[0..n]);
+
+        println!("<<< {}", self.peer_addr().unwrap());
         println!("{}", res);
         println!("---");
 

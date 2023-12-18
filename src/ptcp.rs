@@ -269,17 +269,19 @@ impl PTCP for UdpSocket {
         println!(">>> {}", self.peer_addr().unwrap());
         println!("{:?}", packet);
         packet.try_print_data();
+        println!("---");
 
         let packet = packet.serialize();
         self.send(&packet).await.unwrap();
-        println!("---");
     }
 
     async fn ptcp_read(&self) -> PTCPPacket {
-        println!("<<< {}", self.peer_addr().unwrap());
+        println!("### {}", self.peer_addr().unwrap());
 
         let mut buf = [0u8; 4096];
         let n = self.recv(&mut buf).await.unwrap();
+
+        println!("<<< {}", self.peer_addr().unwrap());
         let packet = PTCPPacket::parse(&buf[0..n]);
         println!("{:?}", packet);
         packet.try_print_data();
