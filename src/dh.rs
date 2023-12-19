@@ -330,15 +330,11 @@ pub async fn p2p_handshake_relay(socket: &UdpSocket, serial: String) -> PTCPSess
         .await;
     socket.dh_read().await;
 
-    let mut res = socket2.dh_read().await;
+    let res = socket2.dh_read().await;
 
     if res.code == 100 {
-        res = socket2.dh_read().await;
+        socket2.dh_read().await;
     }
-
-    let device = &res.body.unwrap()["body/PubAddr"];
-
-    socket2.connect(device).await.unwrap();
 
     socket.connect(MAIN_SERVER).await.unwrap();
 
