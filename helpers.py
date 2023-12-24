@@ -4,20 +4,62 @@ DH-P2P Helper Functions
 import base64
 import datetime
 import hashlib
+import hmac
 import json
 import random
 import socket
+import time
 from struct import pack, unpack
 
 import xmltodict
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 MAIN_SERVER = "www.easy4ipcloud.com"
 MAIN_PORT = 8800
 
 USERNAME = "P2PClient"
 USERKEY = "YXQ3Mahe-5H-R1Z_"
+RANDSALT = "5daf91fc5cfc1be8e081cfb08f792726"
+IV = b"2z52*lk9o6HRyJrf"
 
 CSEQ = 0
+
+
+def get_key(username, password):
+    key = f"{username}:Login to {RANDSALT}:{password}"
+    return hashlib.md5(key.encode()).hexdigest().upper().encode()
+
+
+def get_nonce():
+    return random.randrange(2**31)
+
+
+def get_enc(key: bytes, nonce: int, data: str):
+    salt = str(nonce).encode()
+    dk = hashlib.pbkdf2_hmac("sha256", key, salt, 20000, 32)
+
+    encryptor = Cipher(
+        algorithms.AES(dk), modes.OFB(IV), backend=default_backend()
+    ).encryptor()
+    enc = encryptor.update(data.encode()) + encryptor.finalize()
+
+    return base64.b64encode(enc).decode()
+
+
+def get_auth(username, key, nonce, payload=""):
+    curdate = int(time.time())
+
+    message = f"{nonce}{curdate}{payload}".encode()
+    auth = base64.b64encode(hmac.new(key, message, hashlib.sha256).digest()).decode()
+
+    return (
+        f"<CreateDate>{curdate}</CreateDate>"
+        f"<DevAuth>{auth}</DevAuth>"
+        f"<Nonce>{nonce}</Nonce>"
+        f"<RandSalt>{RANDSALT}</RandSalt>"
+        f"<UserName>{username}</UserName>"
+    )
 
 
 class PTCPPayload:

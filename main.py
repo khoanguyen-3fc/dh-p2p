@@ -9,10 +9,19 @@ import socket
 import subprocess
 from urllib.parse import quote
 
-from helpers import MAIN_PORT, MAIN_SERVER, UDP, PTCPPayload
+from helpers import (
+    MAIN_PORT,
+    MAIN_SERVER,
+    UDP,
+    PTCPPayload,
+    get_auth,
+    get_enc,
+    get_key,
+    get_nonce,
+)
 
 
-def main(serial, username=None, password=None, debug=False):
+def main(serial, type=0, username=None, password=None, debug=False):
     socketserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     socketserver.bind(("0.0.0.0", 554))
     socketserver.listen(5)
@@ -46,9 +55,22 @@ def main(serial, username=None, password=None, debug=False):
     relay_port = int(relay_port)
 
     device_remote = UDP(MAIN_SERVER, MAIN_PORT, debug)
+
+    laddr = f"127.0.0.1:{device_remote.lport}"
+    ipaddr = f"<IpEncrpt>true</IpEncrpt><LocalAddr>{laddr}</LocalAddr>"
+    auth = ""
+
+    if type > 0:
+        key = get_key(username, password)
+        nonce = get_nonce()
+
+        laddr = get_enc(key, nonce, laddr)
+        ipaddr = f"<IpEncrptV2>true</IpEncrptV2><LocalAddr>{laddr}</LocalAddr>"
+        auth = "" if type == 0 else get_auth(username, key, nonce, laddr)
+
     res = device_remote.request(
         f"/device/{serial}/p2p-channel",
-        f"<body><Identify>d4 9e 67 a8 2b d4 7e 1e</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>63.87.143.254,63.87.254.173:{device_remote.lport}</LocalAddr><version>5.0.0</version></body>",
+        f"<body>{auth}<Identify>d4 9e 67 a8 2b d4 7e 1e</Identify>{ipaddr}<version>5.0.0</version></body>",
         should_read=False,
     )
 
@@ -77,9 +99,13 @@ def main(serial, username=None, password=None, debug=False):
 
     main_remote.rhost = MAIN_SERVER
     main_remote.rport = MAIN_PORT
+
+    if type > 0:
+        auth = get_auth(username, key, nonce)
+
     res = main_remote.request(
         f"/device/{serial}/relay-channel",
-        f"<body><agentAddr>{agent_server}:{agent_port}</agentAddr></body>",
+        f"<body>{auth}<agentAddr>{agent_server}:{agent_port}</agentAddr></body>",
         should_read=False,
     )
 
@@ -260,10 +286,17 @@ def main(serial, username=None, password=None, debug=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("serial", help="Serial number of the camera")
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("-t", "--type", type=int, help="Type of the camera", default=0)
     parser.add_argument("-u", "--username", help="Username of the camera")
     parser.add_argument("-p", "--password", help="Password of the camera")
-    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
+    if args.username is None or args.password is None:
+        if args.type > 0:
+            parser.error("Username and password are required for type > 0")
+        elif args.debug:
+            parser.error("Username and password are required in debug mode")
+
     if args.serial:
-        main(args.serial, args.username, args.password, args.debug)
+        main(args.serial, args.type, args.username, args.password, args.debug)
