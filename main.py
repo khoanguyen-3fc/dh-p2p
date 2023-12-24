@@ -17,7 +17,6 @@ def main(serial, username=None, password=None, debug=False):
     socketserver.bind(("0.0.0.0", 554))
     socketserver.listen(5)
     print("Listening on port 554")
-    print("Test with: rtsp://127.0.0.1/cam/realmonitor?channel=1&subtype=0")
 
     if debug:
         subprocess.Popen(
@@ -142,6 +141,7 @@ def main(serial, username=None, password=None, debug=False):
     assert len(res.body) == 0
 
     print("Ready to connect")
+    print("Test with: rtsp://127.0.0.1/cam/realmonitor?channel=1&subtype=0")
     while True:
         ready, _, _ = select.select([socketserver], [], [], 0.1)
 
