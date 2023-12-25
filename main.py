@@ -15,6 +15,7 @@ from helpers import (
     UDP,
     PTCPPayload,
     get_auth,
+    get_dec,
     get_enc,
     get_key,
     get_nonce,
@@ -59,6 +60,7 @@ def main(serial, type=0, username=None, password=None, debug=False):
     laddr = f"127.0.0.1:{device_remote.lport}"
     ipaddr = f"<IpEncrpt>true</IpEncrpt><LocalAddr>{laddr}</LocalAddr>"
     auth = ""
+    aid = random.randbytes(8)
 
     if type > 0:
         key = get_key(username, password)
@@ -70,7 +72,7 @@ def main(serial, type=0, username=None, password=None, debug=False):
 
     res = device_remote.request(
         f"/device/{serial}/p2p-channel",
-        f"<body>{auth}<Identify>d4 9e 67 a8 2b d4 7e 1e</Identify>{ipaddr}<version>5.0.0</version></body>",
+        f"<body>{auth}<Identify>{' '.join(f'{b:x}' for b in aid)}</Identify>{ipaddr}<version>5.0.0</version></body>",
         should_read=False,
     )
 
@@ -91,6 +93,11 @@ def main(serial, type=0, username=None, password=None, debug=False):
     res = device_remote.read()
     if res["code"] != 200:
         res = device_remote.read()
+
+    device_laddr = res["data"]["body"]["LocalAddr"]
+    if type > 0:
+        nonce = res["data"]["body"]["Nonce"]
+        device_laddr = get_dec(key, nonce, device_laddr)
 
     device_server, device_port = res["data"]["body"]["PubAddr"].split(":")
     device_port = int(device_port)
@@ -128,7 +135,21 @@ def main(serial, type=0, username=None, password=None, debug=False):
     device_remote.rhost = device_server
     device_remote.rport = device_port
 
-    data = b"\xff\xfe\xff\xe7\xde\xed\x5b\xbd\xb3\x03\xef\x13\x41\x2b\x12\xae\xf9\xba\xb2\x66\x7f\xd5\xff\xf7\x2b\x61\x98\x57\xd4\x2b\x81\xe1\xff\xfb\xff\xf7\xff\xfe\xa8\x13\x21\x02\xd2\x65"
+    aid = bytes(0xFF - b for b in aid)
+    cookie = random.randbytes(4)
+    trasn_id = random.randbytes(12)
+    eaddr = device_port.to_bytes(2) + socket.inet_aton(device_server)
+    eaddr = bytes(0xFF - b for b in eaddr)
+
+    data = (
+        b"\xff\xfe\xff\xe7"
+        + cookie
+        + trasn_id
+        + b"\x7f\xd5\xff\xf7"
+        + aid
+        + b"\xff\xfb\xff\xf7\xff\xfe"
+        + eaddr
+    )
     print(f":{device_remote.lport} >>> {device_remote.rhost}:{device_remote.rport}")
     print("".join(f"\\x{b:02X}" for b in data))
     device_remote.send(data)
@@ -138,10 +159,43 @@ def main(serial, type=0, username=None, password=None, debug=False):
     print("Data <<<")
     print("".join(f"\\x{b:02X}" for b in data))
 
-    data = b"\xfe\xfe\xff\xe7\xde\xed\x5b\xbd\xd3\xfa\x95\xab\x92\x98\xc8\xe0\x6b\x6e\x84\x4e\x7f\xd6\xff\xf7\x2b\x61\x98\x57\xd4\x2b\x81\xe1\xff\xfb\xff\xf7\xff\xfe\xa8\x13\x3f\x57\xfe\x37"
+    rtrans_id = data[8:20]
+    ip, port = device_laddr.split(":")
+    port = int(port)
+    eaddr = port.to_bytes(2) + socket.inet_aton(ip)
+
+    data = (
+        b"\xfe\xfe\xff\xe7"
+        + cookie
+        + rtrans_id
+        + b"\x7f\xd6\xff\xf7"
+        + aid
+        + b"\xff\xfb\xff\xf7\xff\xfe"
+        + eaddr
+    )
     print("Request >>>")
     print("".join(f"\\x{b:02X}" for b in data))
     device_remote.send(data)
+
+    if type > 0:
+        data = device_remote.recv()
+        print("Data <<<")
+        print("".join(f"\\x{b:02X}" for b in data))
+
+        data = (
+            b"\xfe\xfe\xff\xf3"
+            + cookie
+            + rtrans_id
+            + b"\x7f\xd6\xff\xf7"
+            + aid
+            + b"\xff\xfb\xff\xf7\xff\xfe"
+            + b"\xa8\x13\x3f\x57\xfe\x37"
+        )
+
+        for _ in range(5):
+            print("Request >>>")
+            print("".join(f"\\x{b:02X}" for b in data))
+            device_remote.send(data)
 
     for _ in range(5):
         data = device_remote.recv()

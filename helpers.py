@@ -47,6 +47,18 @@ def get_enc(key: bytes, nonce: int, data: str):
     return base64.b64encode(enc).decode()
 
 
+def get_dec(key: bytes, nonce: int, data: str):
+    salt = str(nonce).encode()
+    dk = hashlib.pbkdf2_hmac("sha256", key, salt, 20000, 32)
+
+    encryptor = Cipher(
+        algorithms.AES(dk), modes.OFB(IV), backend=default_backend()
+    ).encryptor()
+    dec = encryptor.update(base64.b64decode(data)) + encryptor.finalize()
+
+    return dec.decode()
+
+
 def get_auth(username, key, nonce, payload=""):
     curdate = int(time.time())
 
