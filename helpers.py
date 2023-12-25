@@ -178,7 +178,7 @@ class UDP(socket.socket):
         return self.recvfrom(bufsize)[0]
 
     def read(self):
-        data = self.recv().decode("ascii")
+        data = self.recv().decode()
 
         print(f":{self.lport} <<< {self.rhost}:{self.rport}")
         print(data.replace("\r\n", "\n"))
@@ -202,8 +202,8 @@ class UDP(socket.socket):
         curdate = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         pwd = f"{nonce}{curdate}DHP2P:{USERNAME}:{USERKEY}"
         hash_digest = hashlib.sha1()
-        hash_digest.update(pwd.encode("ascii"))
-        digest = base64.b64encode(hash_digest.digest()).decode("ascii")
+        hash_digest.update(pwd.encode())
+        digest = base64.b64encode(hash_digest.digest()).decode()
 
         req = f"""{'DHPOST' if body else 'DHGET'} {path} HTTP/1.1
 CSeq: {CSEQ}
@@ -223,7 +223,7 @@ Content-Length: {len(body)}
 
         print(f":{self.lport} >>> {self.rhost}:{self.rport}")
         print(req)
-        self.send(req.replace("\n", "\r\n").encode("ascii"))
+        self.send(req.replace("\n", "\r\n").encode())
 
         return self.read() if should_read else None
 
