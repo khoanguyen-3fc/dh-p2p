@@ -22,7 +22,24 @@ In my specific scenario, I have a KBVision CCTV system. Although I can access th
 
 ## Rust implementation
 
-[WIP]
+Rust implementation utilizing async programming and message passing pattern, making it more efficient and flexible.
+
+### Rust usage
+
+```text
+A PoC implementation of TCP tunneling over Dahua P2P protocol.
+
+Usage: dh-p2p [OPTIONS] <SERIAL>
+
+Arguments:
+  <SERIAL>  Serial number of the camera
+
+Options:
+  -p, --port <[bind_address:]port:remote_port>
+          Bind address, port and remote port. Default: 127.0.0.1:1554:554
+  -h, --help
+          Print help
+```
 
 ## Python implementation
 
@@ -45,7 +62,7 @@ python main.py [CAMERA_SERIAL]
 ffplay -rtsp_transport tcp -i "rtsp://[username]:[password]@127.0.0.1/cam/realmonitor?channel=1&subtype=0"
 ```
 
-### Usage
+### Python usage
 
 To use the script with a device that requires authentication when creating a channel, use the `-t 1` option.
 
