@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use sha1::Digest;
-use std::collections::HashMap;
+use std::{collections::HashMap, net::SocketAddrV4};
 use tokio::net::UdpSocket;
 use xml::reader::{EventReader, XmlEvent};
 
@@ -11,6 +11,18 @@ static MAIN_SERVER: &str = "www.easy4ipcloud.com:8800";
 
 static USERNAME: &str = "P2PClient";
 static USERKEY: &str = "YXQ3Mahe-5H-R1Z_";
+
+fn ip_to_bytes(ip: &str) -> Vec<u8> {
+    let addr: SocketAddrV4 = ip.parse().unwrap();
+    let ip = addr.ip().octets();
+    let port = addr.port();
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&port.to_be_bytes());
+    bytes.extend_from_slice(&ip);
+
+    bytes.iter().map(|b| !b).collect()
+}
 
 pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
     let mut cseq = 0;
@@ -44,11 +56,14 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
         .await;
     socket2.dh_read().await;
 
+    let cid: [u8; 8] = rand::random();
+
     socket
         .dh_request(
             format!("/device/{}/p2p-channel", serial).as_ref(),
             Some(format!(
-                "<body><Identify>d4 9e 67 a8 2b d4 7e 1e</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>63.87.143.254,63.87.254.173:{}</LocalAddr><version>5.0.0</version></body>",
+                "<body><Identify>{}</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>127.0.0.1:{}</LocalAddr><version>5.0.0</version></body>",
+                cid.iter().map(|b| format!("{:x}", b)).collect::<Vec<_>>().join(" "),
                 socket.local_addr().unwrap().port(),
             ).as_ref()),
             &mut cseq,
@@ -79,7 +94,9 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
         res = socket.dh_read().await;
     }
 
-    let device = &res.body.unwrap()["body/PubAddr"];
+    let data = res.body.unwrap();
+    let device_laddr = &data["body/LocalAddr"];
+    let device = &data["body/PubAddr"];
 
     socket.connect(device).await.unwrap();
 
@@ -128,8 +145,21 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
             .join("")
     );
 
+    let cookie: [u8; 4] = rand::random();
+    let trans_id: [u8; 12] = rand::random();
+    let cid: Vec<u8> = cid.iter().map(|b| !b).collect();
+
     println!(">>> {}", socket.peer_addr().unwrap());
-    let data = b"\xff\xfe\xff\xe7\xde\xed\x5b\xbd\xb3\x03\xef\x13\x41\x2b\x12\xae\xf9\xba\xb2\x66\x7f\xd5\xff\xf7\x2b\x61\x98\x57\xd4\x2b\x81\xe1\xff\xfb\xff\xf7\xff\xfe\xa8\x13\x21\x02\xd2\x65";
+    let data = [
+        b"\xff\xfe\xff\xe7".to_vec(),
+        cookie.to_vec(),
+        trans_id.to_vec(),
+        b"\x7f\xd5\xff\xf7".to_vec(),
+        cid.clone(),
+        b"\xff\xfb\xff\xf7\xff\xfe".to_vec(),
+        ip_to_bytes(&device),
+    ]
+    .concat();
     println!(
         "Raw [{}]",
         data.iter()
@@ -137,7 +167,7 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    socket.send(data).await.unwrap();
+    socket.send(&data).await.unwrap();
     println!("---");
 
     println!("<<< {}", socket.peer_addr().unwrap());
@@ -153,8 +183,19 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
     );
     println!("---");
 
+    let rtrans_id = &buf[8..20];
+
     println!(">>> {}", socket.peer_addr().unwrap());
-    let data = b"\xfe\xfe\xff\xe7\xde\xed\x5b\xbd\xd3\xfa\x95\xab\x92\x98\xc8\xe0\x6b\x6e\x84\x4e\x7f\xd6\xff\xf7\x2b\x61\x98\x57\xd4\x2b\x81\xe1\xff\xfb\xff\xf7\xff\xfe\xa8\x13\x3f\x57\xfe\x37";
+    let data = [
+        b"\xfe\xfe\xff\xe7".to_vec(),
+        cookie.to_vec(),
+        rtrans_id.to_vec(),
+        b"\x7f\xd6\xff\xf7".to_vec(),
+        cid.clone(),
+        b"\xff\xfb\xff\xf7\xff\xfe".to_vec(),
+        ip_to_bytes(&device_laddr),
+    ]
+    .concat();
     println!(
         "Raw [{}]",
         data.iter()
@@ -162,7 +203,7 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    socket.send(data).await.unwrap();
+    socket.send(&data).await.unwrap();
     println!("---");
 
     // read 5 times
