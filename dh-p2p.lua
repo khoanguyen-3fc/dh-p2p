@@ -1,6 +1,6 @@
 --[[ Dahua HTTP ]] --
 local dhttp = Proto("dhttp", "Dahua HTTP")
-http = Dissector.get("http")
+local http = Dissector.get("http")
 
 dhttp:register_heuristic("udp", function(tvb, pinfo, tree)
     local prefix = tvb(0, 4):string()
@@ -9,7 +9,7 @@ dhttp:register_heuristic("udp", function(tvb, pinfo, tree)
         return false
     end
 
-    if prefix == "DHGE" or prefix == "DHPO"  then
+    if prefix == "DHGE" or prefix == "DHPO" then
         tvb = tvb:bytes(2):tvb("Dahua HTTP")
     end
 
@@ -36,7 +36,7 @@ end)
 
 --[[ Inverted STUN ]] --
 local istun = Proto("istun", "Inverted STUN")
-stun = Dissector.get("stun-udp")
+local stun = Dissector.get("stun-udp")
 
 istun:register_heuristic("udp", function(buffer, pinfo, tree)
     local prefix = buffer:bytes(0, 1):uint()
@@ -56,20 +56,20 @@ istun:register_heuristic("udp", function(buffer, pinfo, tree)
 end)
 
 --[[ Phony TCP ]] --
-ptcp_protocol = Proto("ptcp", "PhonyTCP Protocol")
+local ptcp_protocol = Proto("ptcp", "Phony TCP")
 
-bytes_sent = ProtoField.uint32("ptcp.bytes_sent", "Bytes Sent", base.DEC)
-bytes_recv = ProtoField.uint32("ptcp.bytes_recv", "Bytes Received", base.DEC)
-package_id = ProtoField.uint32("ptcp.package_id", "Package ID", base.HEX)
-local_message_id = ProtoField.uint32("ptcp.local_message_id", "Local Message ID", base.DEC)
-remote_message_id = ProtoField.uint32("ptcp.remote_message_id", "Remote Message ID", base.DEC)
+local bytes_sent = ProtoField.uint32("ptcp.bytes_sent", "Bytes Sent", base.DEC)
+local bytes_recv = ProtoField.uint32("ptcp.bytes_recv", "Bytes Received", base.DEC)
+local package_id = ProtoField.uint32("ptcp.package_id", "Package ID", base.HEX)
+local local_message_id = ProtoField.uint32("ptcp.local_message_id", "Local Message ID", base.DEC)
+local remote_message_id = ProtoField.uint32("ptcp.remote_message_id", "Remote Message ID", base.DEC)
 
-ptcp_type = ProtoField.uint8("ptcp.type", "Type", base.HEX)
-ptcp_length = ProtoField.uint24("ptcp.length", "Length", base.DEC)
-ptcp_realm = ProtoField.uint32("ptcp.realm", "Realm", base.HEX)
-ptcp_padding = ProtoField.uint32("ptcp.padding", "Padding", base.DEC)
-ptcp_payload = ProtoField.bytes("ptcp.payload", "Hex", base.SPACE)
-ptcp_payload_string = ProtoField.string("ptcp.payload.string", "Str", base.ASCII)
+local ptcp_type = ProtoField.uint8("ptcp.type", "Type", base.HEX)
+local ptcp_length = ProtoField.uint24("ptcp.length", "Length", base.DEC)
+local ptcp_realm = ProtoField.uint32("ptcp.realm", "Realm", base.HEX)
+local ptcp_padding = ProtoField.uint32("ptcp.padding", "Padding", base.DEC)
+local ptcp_payload = ProtoField.bytes("ptcp.payload", "Hex", base.SPACE)
+local ptcp_payload_string = ProtoField.string("ptcp.payload.string", "Str", base.ASCII)
 
 ptcp_protocol.fields = {
     bytes_sent, bytes_recv, package_id, local_message_id, remote_message_id,
@@ -77,8 +77,10 @@ ptcp_protocol.fields = {
 }
 
 local function heuristic_checker(buffer, pinfo, tree)
-    length = buffer:len()
-    if length < 4 then return false end
+    local length = buffer:len()
+    if length < 4 then
+        return false
+    end
 
     if buffer(0, 4):string() == "PTCP" then
         ptcp_protocol.dissector(buffer, pinfo, tree)
@@ -89,11 +91,13 @@ local function heuristic_checker(buffer, pinfo, tree)
 end
 
 function ptcp_protocol.dissector(buffer, pinfo, tree)
-    length = buffer:len()
-    if length < 4 then return end
+    local length = buffer:len()
+    if length < 4 then
+        return
+    end
 
     pinfo.cols.protocol = "PTCP"
-    local subtree = tree:add(ptcp_protocol, buffer(), "PhonyTCP Protocol")
+    local subtree = tree:add(ptcp_protocol, buffer(), "Phony TCP")
     local header = subtree:add(buffer(0, 24), "Header")
 
     header:add(bytes_sent, buffer(4, 4))
@@ -101,20 +105,26 @@ function ptcp_protocol.dissector(buffer, pinfo, tree)
     header:add(package_id, buffer(12, 4))
     header:add(local_message_id, buffer(16, 4))
     header:add(remote_message_id, buffer(20, 4))
-    
-    if length <= 24 then return end
+
+    if length <= 24 then
+        return
+    end
 
     local data = subtree:add(buffer(24, length - 24), "Data")
 
     data:add(ptcp_type, buffer(24, 1))
     data:add(ptcp_length, buffer(25, 3))
-    
-    if length <= 28 then return end
+
+    if length <= 28 then
+        return
+    end
 
     data:add(ptcp_realm, buffer(28, 4))
     data:add(ptcp_padding, buffer(32, 4))
 
-    if length <= 36 then return end
+    if length <= 36 then
+        return
+    end
 
     data:add(ptcp_payload, buffer(36, length - 36))
 
