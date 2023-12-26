@@ -47,7 +47,9 @@ ffplay -rtsp_transport tcp -i "rtsp://[username]:[password]@127.0.0.1/cam/realmo
 
 ### Usage
 
-`USERNAME` and `PASSWORD` only need for debug mode and `ffplay` is required.
+To use the script with a device that requires authentication when creating a channel, use the `-t 1` option.
+
+When running in `--debug` mode or when the `--type` > 0, the `USERNAME` and `PASSWORD` arguments are mandatory. Additionally, make sure that `ffplay` is in the system path when debug mode is enabled.
 
 ```text
 usage: main.py [-h] [-u USERNAME] [-p PASSWORD] [-d] serial
