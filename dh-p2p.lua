@@ -1,3 +1,61 @@
+--[[ Dahua HTTP ]] --
+local dhttp = Proto("dhttp", "Dahua HTTP")
+http = Dissector.get("http")
+
+dhttp:register_heuristic("udp", function(tvb, pinfo, tree)
+    local prefix = tvb(0, 4):string()
+
+    if prefix ~= "DHGE" and prefix ~= "DHPO" and prefix ~= "GET " and prefix ~= "POST" and prefix ~= "HTTP" then
+        return false
+    end
+
+    if prefix == "DHGE" or prefix == "DHPO"  then
+        tvb = tvb:bytes(2):tvb("Dahua HTTP")
+    end
+
+    local find = "Content%-Type: \r\n"
+    local replace = "Content-Type: application/xml\r\n"
+
+    local data = tvb():string()
+    local index = data:find(find)
+
+    if index ~= nil then
+        local hex = ""
+
+        data = data:gsub(find, replace)
+        for i = 1, data:len() do
+            hex = hex .. string.format("%02x", data:byte(i))
+        end
+
+        tvb = ByteArray.new(hex):tvb("Dahua HTTP")
+    end
+
+    http(tvb, pinfo, tree)
+    return true
+end)
+
+--[[ Inverted STUN ]] --
+local istun = Proto("istun", "Inverted STUN")
+stun = Dissector.get("stun-udp")
+
+istun:register_heuristic("udp", function(buffer, pinfo, tree)
+    local prefix = buffer:bytes(0, 1):uint()
+    if prefix ~= 0xFF and prefix ~= 0xFE then
+        return false
+    end
+
+    local hex = ""
+    for i = 0, buffer:len() - 1 do
+        hex = hex .. string.format("%02x", 255 - buffer:bytes():get_index(i))
+    end
+
+    local tvb = ByteArray.new(hex):tvb("Inverted Payload")
+
+    stun(tvb, pinfo, tree)
+    return true
+end)
+
+--[[ Phony TCP ]] --
 ptcp_protocol = Proto("ptcp", "PhonyTCP Protocol")
 
 bytes_sent = ProtoField.uint32("ptcp.bytes_sent", "Bytes Sent", base.DEC)

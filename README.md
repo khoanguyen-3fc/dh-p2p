@@ -18,7 +18,7 @@ In my specific scenario, I have a KBVision CCTV system. Although I can access th
   - `helpers.py` - Helper functions
   - `requirements.txt` - Python dependencies
 - Others:
-  - `ptcp.lua` - Wireshark dissector for Dahua P2P protocol
+  - `dh-p2p.lua` - Wireshark dissector for Dahua P2P protocol
 
 ## Rust implementation
 
@@ -71,7 +71,7 @@ options:
 
 ## Protocol description
 
-For reverse engineering the protocol, I used [Wireshark](https://www.wireshark.org/) and [KBiVMS V2.02.0](https://kbvisiongroup.com/support/download-center.html) as a client on Windows. Using `ptcp.lua` dissector, you can see the protocol in Wireshark easier.
+For reverse engineering the protocol, I used [Wireshark](https://www.wireshark.org/) and [KBiVMS V2.02.0](https://kbvisiongroup.com/support/download-center.html) as a client on Windows. Using `dh-p2p.lua` dissector, you can see the protocol in Wireshark easier.
 
 For RTSP client, either [VLC](https://www.videolan.org/vlc/) or [ffplay](https://ffmpeg.org/ffplay.html) can be used for easier control of the signals.
 
