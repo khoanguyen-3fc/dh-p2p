@@ -4,7 +4,7 @@ This is a proof of concept implementation of RTSP over Dahua P2P protocol. It wo
 
 ## Motivation
 
-The Dahua P2P protocol is utilized for remote access to Dahua devices. It is commonly used by Dahua apps such as [gDMSS Lite](https://play.google.com/store/apps/details?id=com.mm.android.direct.gdmssphoneLite) on Android or [KBiVMS](https://kbvisiongroup.com/support/download-center.html) on Windows.
+The Dahua P2P protocol is utilized for remote access to Dahua devices. It is commonly used by Dahua apps such as [gDMSS Lite](https://play.google.com/store/apps/details?id=com.mm.android.direct.gdmssphoneLite) on Android or [SmartPSS](https://dahuawiki.com/SmartPSS), [KBiVMS](https://kbvisiongroup.com/support/download-center.html) on Windows.
 
 In my specific scenario, I have a KBVision CCTV system. Although I can access the cameras using the KBiVMS client, I primarily use non-Windows platforms. Therefore, I wanted to explore alternative options for streaming the video using an RTSP client, which is more widely supported. As a result, I decided to experiment with reimplementing the Dahua P2P protocol.
 
@@ -25,6 +25,8 @@ In my specific scenario, I have a KBVision CCTV system. Although I can access th
 [WIP]
 
 ## Python implementation
+
+The Python implementation of DH-P2P is a simple and straightforward approach. It is used for drafting and testing purposes due to its quick and easy-to-write nature. Additionally, the implementation is more linear and follows a top-down execution flow, making it easier to understand. Python, being a popular programming language, further contributes to its accessibility and familiarity among developers.
 
 ### Setup
 
@@ -55,16 +57,18 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  -d, --debug           Enable debug mode
+  -t TYPE, --type TYPE  Type of the camera
   -u USERNAME, --username USERNAME
                         Username of the camera
   -p PASSWORD, --password PASSWORD
-                        Password of the camera
-  -d, --debug           Enable debug mode
+                        Password of the camer
 ```
 
 ### Limitations
 
 - Single threaded, so only one client can connect at a time
+- Polling based, so it's inefficient and inflexible
 - Not fully implemented (e.g. only simplex keep-alive, no mulpile connections, etc.)
 - Work better with `ffplay` and `-rtsp_transport tcp` option
 - Still unstable, can crash at any time
