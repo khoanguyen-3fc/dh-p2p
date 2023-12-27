@@ -176,10 +176,77 @@ sequenceDiagram
 
 _Note_: Both connections marked with `(*)` and all subsequent connections to the device must use the same UDP local port.
 
-### PTCP (a.k.a. PhonyTCP) protocol
+### PTCP protocol
 
-PTCP, also known as PhonyTCP, is a proprietary protocol developed by Dahua. Its primary function is to encapsulate TCP packets within UDP packets. This is particularly useful for creating a tunnel between the client and a device that is situated behind a NAT.
+PTCP (PhonyTCP) is a proprietary protocol developed by Dahua. It serves the purpose of encapsulating TCP packets within UDP packets, enabling the creation of a tunnel between a client and a device behind a NAT.
 
-Please note that there is no official documentation available for PTCP. The information provided here is based on reverse engineering.
+Please note that official documentation for PTCP is not available. The information provided here is based on reverse engineering.
 
-[WIP]
+### PTCP packet header
+
+The PTCP packet header is a fixed 24-byte structure, as outlined below:
+
+```text
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             magic                             |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             sent                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             recv                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             pid                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             lmid                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             rmid                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+- `magic`: A constant value, `PTCP`.
+- `sent` and `recv`: Track the number of bytes sent and received, respectively.
+- `pid`: The Packet ID.
+- `lmid`: The Local ID.
+- `rmid`: The Local ID of previously received packet.
+
+### PTCP packet body
+
+The packet body varies in size (0, 4, 12 bytes or more) based on the packet type. Its structure is as follows:
+
+```text
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|      type       |                     len                     |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             realm                             |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             padding                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                             data                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+- `type`: Specifies the packet type.
+- `len`: The length of the `data` field.
+- `realm`: The Realm ID of the connection.
+- `padding`: Padding bytes, always set to 0.
+- `data`: The packet data.
+
+Packet types:
+
+- Special:
+  - Empty body
+  - `0x00`: SYN, the body is always 4 bytes `0x00030100`.
+- Realm:
+  - `0x10`: TCP data, where `len` is the length of the TCP data.
+  - `0x11`: Binding port request.
+  - `0x12`: Connection status, where the data is either `CONN` or `DISC`.
+- Common (with `realm` set to 0):
+  - `0x13`: Heartbeat, where `len` is always 0.
+  - `0x17`
+  - `0x18`
+  - `0x19`: Authentication.
+  - `0x1a`: Server response after `0x19`.
+  - `0x1b`: Client response after `0x1a`.
