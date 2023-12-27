@@ -250,3 +250,10 @@ Packet types:
   - `0x19`: Authentication.
   - `0x1a`: Server response after `0x19`.
   - `0x1b`: Client response after `0x1a`.
+
+## Acknowledgments
+
+This project has been inspired and influenced by the following projects and people:
+
+- [mcw0/PoC](https://github.com/mcw0/PoC): The foundational structure for the handshake and the PTCP protocol.
+- [@p2p-sys](https://github.com/p2p-sys): The idea of inverting the STUN protocol.
