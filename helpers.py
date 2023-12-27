@@ -175,8 +175,16 @@ class UDP(socket.socket):
     def send(self, data):
         self.sendto(data, (self.rhost, self.rport))
 
-    def recv(self, bufsize=4096):
-        return self.recvfrom(bufsize)[0]
+    def recv(self, bufsize=4096, timeout=None):
+        if timeout:
+            self.settimeout(timeout)
+
+        data = self.recvfrom(bufsize)[0]
+
+        if timeout:
+            self.settimeout(None)
+
+        return data
 
     def read(self, return_error=False):
         data = self.recv().decode()

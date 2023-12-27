@@ -167,8 +167,14 @@ def main(serial, dtype=0, username=None, password=None, debug=False):
     print("".join(f"\\x{b:02X}" for b in data))
     device_remote.send(data)
 
-    # TODO: check timeout
-    data = device_remote.recv()
+    try:
+        data = device_remote.recv(timeout=5)
+    except socket.timeout:
+        print("Timeout occurred while waiting for a response from the device.")
+        print("If the issue persists, you may need to use relay mode with this device.")
+        print("Note: Relay mode is currently not implemented for Python.")
+        sys.exit(1)
+
     print("Data <<<")
     print("".join(f"\\x{b:02X}" for b in data))
 
