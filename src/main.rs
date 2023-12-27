@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use crate::{
-    dh::{p2p_handshake, p2p_handshake_relay},
+    dh::p2p_handshake,
     process::{dh_reader, dh_writer, process_reader, process_writer},
     ptcp::PTCPEvent,
 };
@@ -60,12 +60,10 @@ async fn main() {
 
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
 
+    let (socket, session) = p2p_handshake(socket, serial, args.relay).await;
+
     let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
-    let session = Arc::new(Mutex::new(if args.relay {
-        p2p_handshake_relay(&socket, serial).await
-    } else {
-        p2p_handshake(&socket, serial).await
-    }));
+    let session = Arc::new(Mutex::new(session));
 
     let channels = Arc::new(Mutex::new(HashMap::<u32, mpsc::Sender<Vec<u8>>>::new()));
     let conn_channels = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<bool>>::new()));

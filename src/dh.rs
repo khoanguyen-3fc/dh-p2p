@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use sha1::Digest;
 use std::{collections::HashMap, net::SocketAddrV4};
-use tokio::net::UdpSocket;
+use tokio::{net::UdpSocket, time};
 use xml::reader::{EventReader, XmlEvent};
 
 use crate::ptcp::{PTCPBody, PTCPSession, PTCP};
@@ -24,7 +24,11 @@ fn ip_to_bytes(ip: &str) -> Vec<u8> {
     bytes.iter().map(|b| !b).collect()
 }
 
-pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
+pub async fn p2p_handshake(
+    socket: UdpSocket,
+    serial: String,
+    relay_mode: bool,
+) -> (UdpSocket, PTCPSession) {
     let mut cseq = 0;
 
     socket.connect(MAIN_SERVER).await.unwrap();
@@ -98,6 +102,7 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
     let device_laddr = &data["body/LocalAddr"];
     let device = &data["body/PubAddr"];
 
+    // not necessary when relay_mode is true, but UDP is connectionless
     socket.connect(device).await.unwrap();
 
     socket2.connect(MAIN_SERVER).await.unwrap();
@@ -120,6 +125,10 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
         .ptcp_request(session.send(PTCPBody::Command(b"\x00\x03\x01\x00".to_vec())))
         .await;
     session.recv(socket2.ptcp_read().await);
+
+    if relay_mode {
+        return (socket2, session);
+    }
 
     socket2
         .ptcp_request(session.send(PTCPBody::Command(
@@ -172,7 +181,18 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
 
     println!("<<< {}", socket.peer_addr().unwrap());
     let mut buf = [0u8; 4096];
-    let n = socket.recv(&mut buf).await.unwrap();
+
+    let result = time::timeout(time::Duration::from_secs(5), socket.recv(&mut buf)).await;
+
+    if result.is_err() {
+        println!("Timeout occurred while waiting for a response from the device.");
+        println!(
+            "If the issue persists, you may need to use relay mode (--relay) with this device."
+        );
+        panic!("Timeout");
+    }
+
+    let n = result.unwrap().unwrap();
     println!(
         "Raw [{}]",
         buf[0..n]
@@ -266,98 +286,7 @@ pub async fn p2p_handshake(socket: &UdpSocket, serial: String) -> PTCPSession {
 
     assert!(matches!(res.body, PTCPBody::Empty), "Invalid response");
 
-    session
-}
-
-pub async fn p2p_handshake_relay(socket: &UdpSocket, serial: String) -> PTCPSession {
-    let mut cseq = 0;
-
-    socket.connect(MAIN_SERVER).await.unwrap();
-
-    socket.dh_request("/probe/p2psrv", None, &mut cseq).await;
-    socket.dh_read().await;
-
-    socket
-        .dh_request(
-            format!("/online/p2psrv/{}", serial).as_ref(),
-            None,
-            &mut cseq,
-        )
-        .await;
-    let p2psrv = &socket.dh_read().await.body.unwrap()["body/US"];
-
-    socket.dh_request("/online/relay", None, &mut cseq).await;
-    let relay = &socket.dh_read().await.body.unwrap()["body/Address"];
-
-    let socket2 = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-    socket2.connect(p2psrv).await.unwrap();
-
-    socket2
-        .dh_request(
-            format!("/probe/device/{}", serial).as_ref(),
-            None,
-            &mut cseq,
-        )
-        .await;
-    socket2.dh_read().await;
-
-    socket2
-        .dh_request(
-            format!("/device/{}/p2p-channel", serial).as_ref(),
-            Some(format!(
-                "<body><Identify>d4 9e 67 a8 2b d4 7e 1e</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>63.87.143.254,63.87.254.173:{}</LocalAddr><version>5.0.0</version></body>",
-                socket2.local_addr().unwrap().port(),
-            ).as_ref()),
-            &mut cseq,
-        )
-        .await;
-
-    socket.connect(relay).await.unwrap();
-
-    socket.dh_request("/relay/agent", None, &mut cseq).await;
-    let data = socket.dh_read().await.body.unwrap();
-    let token = &data["body/Token"];
-    let agent = &data["body/Agent"];
-
-    socket.connect(agent).await.unwrap();
-
-    socket
-        .dh_request(
-            format!("/relay/start/{}", token).as_ref(),
-            Some("<body><Client>:0</Client></body>"),
-            &mut cseq,
-        )
-        .await;
-    socket.dh_read().await;
-
-    let res = socket2.dh_read().await;
-
-    if res.code == 100 {
-        socket2.dh_read().await;
-    }
-
-    socket.connect(MAIN_SERVER).await.unwrap();
-
-    socket
-        .dh_request(
-            format!("/device/{}/relay-channel", serial).as_ref(),
-            Some(format!("<body><agentAddr>{}</agentAddr></body>", agent).as_ref()),
-            &mut cseq,
-        )
-        .await;
-
-    socket.connect(agent).await.unwrap();
-    // TODO: check timeout
-    socket.dh_read().await;
-
-    let mut session = PTCPSession::new();
-
-    socket
-        .ptcp_request(session.send(PTCPBody::Command(b"\x00\x03\x01\x00".to_vec())))
-        .await;
-    session.recv(socket.ptcp_read().await);
-
-    session
+    (socket, session)
 }
 
 #[derive(Debug)]
