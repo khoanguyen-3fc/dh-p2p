@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use crate::{
-    dh::p2p_handshake,
+    dh::{p2p_handshake, p2p_handshake_relay},
     process::{dh_reader, dh_writer, process_reader, process_writer},
     ptcp::PTCPEvent,
 };
@@ -24,6 +24,9 @@ struct Cli {
     /// Bind address, port and remote port. Default: 127.0.0.1:1554:554
     #[arg(short, long, value_name = "[bind_address:]port:remote_port")]
     port: Option<String>,
+    /// Relay mode (experimental)
+    #[arg(short, long)]
+    relay: bool,
     /// Serial number of the camera
     serial: String,
 }
@@ -58,7 +61,11 @@ async fn main() {
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
 
     let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
-    let session = Arc::new(Mutex::new(p2p_handshake(&socket, serial).await));
+    let session = Arc::new(Mutex::new(if args.relay {
+        p2p_handshake_relay(&socket, serial).await
+    } else {
+        p2p_handshake(&socket, serial).await
+    }));
 
     let channels = Arc::new(Mutex::new(HashMap::<u32, mpsc::Sender<Vec<u8>>>::new()));
     let conn_channels = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<bool>>::new()));
