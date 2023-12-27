@@ -8,6 +8,7 @@ import hmac
 import json
 import random
 import socket
+import sys
 import time
 from struct import pack, unpack
 
@@ -177,7 +178,7 @@ class UDP(socket.socket):
     def recv(self, bufsize=4096):
         return self.recvfrom(bufsize)[0]
 
-    def read(self):
+    def read(self, return_error=False):
         data = self.recv().decode()
 
         print(f":{self.lport} <<< {self.rhost}:{self.rport}")
@@ -185,9 +186,9 @@ class UDP(socket.socket):
 
         res = parse_response(data)
 
-        if res["code"] >= 400:
+        if not return_error and res["code"] >= 400:
             print("Error:", res["status"])
-            exit(1)
+            sys.exit(1)
 
         print("Parsed <<<")
         print(json.dumps(res, indent=2))

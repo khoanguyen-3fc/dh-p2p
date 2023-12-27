@@ -7,6 +7,7 @@ import random
 import select
 import socket
 import subprocess
+import sys
 from urllib.parse import quote
 
 from helpers import (
@@ -22,7 +23,7 @@ from helpers import (
 )
 
 
-def main(serial, type=0, username=None, password=None, debug=False):
+def main(serial, dtype=0, username=None, password=None, debug=False):
     socketserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     socketserver.bind(("0.0.0.0", 554))
     socketserver.listen(5)
@@ -62,13 +63,13 @@ def main(serial, type=0, username=None, password=None, debug=False):
     auth = ""
     aid = random.randbytes(8)
 
-    if type > 0:
+    if dtype > 0:
         key = get_key(username, password)
         nonce = get_nonce()
 
         laddr = get_enc(key, nonce, laddr)
         ipaddr = f"<IpEncrptV2>true</IpEncrptV2><LocalAddr>{laddr}</LocalAddr>"
-        auth = "" if type == 0 else get_auth(username, key, nonce, laddr)
+        auth = "" if dtype == 0 else get_auth(username, key, nonce, laddr)
 
     res = device_remote.request(
         f"/device/{serial}/p2p-channel",
@@ -90,12 +91,24 @@ def main(serial, type=0, username=None, password=None, debug=False):
         "<body><Client>:0</Client></body>",
     )
 
-    res = device_remote.read()
-    if res["code"] != 200:
-        res = device_remote.read()
+    res = device_remote.read(return_error=True)
+    if res["code"] < 200:
+        res = device_remote.read(return_error=True)
+
+    if res["code"] >= 400:
+        print("Error:", res["status"])
+
+        if dtype == 0 and res["code"] == 403:
+            print("Device requires authentication when creating P2P channel.")
+            print("Try again with:")
+            print(
+                f"main.py --type 1 --username <username> --password <password> {serial}"
+            )
+
+        sys.exit(1)
 
     device_laddr = res["data"]["body"]["LocalAddr"]
-    if type > 0:
+    if dtype > 0:
         nonce = res["data"]["body"]["Nonce"]
         device_laddr = get_dec(key, nonce, device_laddr)
 
@@ -107,7 +120,7 @@ def main(serial, type=0, username=None, password=None, debug=False):
     main_remote.rhost = MAIN_SERVER
     main_remote.rport = MAIN_PORT
 
-    if type > 0:
+    if dtype > 0:
         auth = get_auth(username, key, nonce)
 
     res = main_remote.request(
@@ -177,7 +190,7 @@ def main(serial, type=0, username=None, password=None, debug=False):
     print("".join(f"\\x{b:02X}" for b in data))
     device_remote.send(data)
 
-    if type > 0:
+    if dtype > 0:
         data = device_remote.recv()
         print("Data <<<")
         print("".join(f"\\x{b:02X}" for b in data))
