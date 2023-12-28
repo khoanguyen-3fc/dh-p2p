@@ -92,10 +92,19 @@ pub async fn p2p_handshake(
         .await;
     socket2.dh_read().await;
 
-    let mut res = socket.dh_read().await;
+    let mut res = socket.dh_read_raw().await;
 
     if res.code == 100 {
-        res = socket.dh_read().await;
+        res = socket.dh_read_raw().await;
+    }
+
+    if res.code >= 400 {
+        if res.code == 403 {
+            println!("Device requires authentication when creating P2P channel.");
+            println!("Authentication is not supported at this time.");
+        }
+
+        panic!("Error response: {}", res.status);
     }
 
     let data = res.body.unwrap();
@@ -367,7 +376,15 @@ impl DHResponse {
 #[async_trait]
 trait DHP2P {
     async fn dh_request(&self, path: &str, body: Option<&str>, seq: &mut u32);
-    async fn dh_read(&self) -> DHResponse;
+    async fn dh_read_raw(&self) -> DHResponse;
+
+    async fn dh_read(&self) -> DHResponse {
+        let res = self.dh_read_raw().await;
+
+        assert!(res.code < 300, "Error response: {}", res.status);
+
+        res
+    }
 }
 
 #[async_trait]
@@ -412,7 +429,7 @@ impl DHP2P for UdpSocket {
         self.send(req.as_bytes()).await.unwrap();
     }
 
-    async fn dh_read(&self) -> DHResponse {
+    async fn dh_read_raw(&self) -> DHResponse {
         println!("### {}", self.peer_addr().unwrap());
 
         let mut buf = [0u8; 4096];
@@ -425,8 +442,6 @@ impl DHP2P for UdpSocket {
 
         let res = DHResponse::parse_response(&res);
         println!("{:?}", res);
-
-        assert!(res.code < 300, "Error response: {}", res.status);
 
         res
     }
