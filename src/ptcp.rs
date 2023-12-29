@@ -3,6 +3,7 @@ use std::cmp;
 use tokio::net::UdpSocket;
 
 pub enum PTCPEvent {
+    Heartbeat,
     Connect(u32),
     Disconnect(u32),
     Data(u32, Vec<u8>),
@@ -16,6 +17,7 @@ pub struct PTCPPayload {
 pub enum PTCPBody {
     Command(Vec<u8>),
     Payload(PTCPPayload),
+    Heartbeat,
     Empty,
 }
 
@@ -92,6 +94,7 @@ impl std::fmt::Debug for PTCPBody {
                     .join(" ")
             ),
             PTCPBody::Payload(payload) => write!(f, "{:?}", payload),
+            PTCPBody::Heartbeat => write!(f, "Heartbeat"),
             PTCPBody::Empty => write!(f, "Empty"),
         }
     }
@@ -115,10 +118,10 @@ impl PTCPBody {
 
         assert!(data.len() >= 4, "Invalid body");
 
-        if data[0] == 0x10 {
-            PTCPBody::Payload(PTCPPayload::parse(data))
-        } else {
-            PTCPBody::Command(data.to_vec())
+        match data[0] {
+            0x10 => PTCPBody::Payload(PTCPPayload::parse(data)),
+            0x13 => PTCPBody::Heartbeat,
+            _ => PTCPBody::Command(data.to_vec()),
         }
     }
 
@@ -126,7 +129,17 @@ impl PTCPBody {
         match self {
             PTCPBody::Command(data) => data.to_vec(),
             PTCPBody::Payload(payload) => payload.serialize(),
+            PTCPBody::Heartbeat => b"\x13\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
             PTCPBody::Empty => Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            PTCPBody::Command(data) => data.len(),
+            PTCPBody::Payload(payload) => payload.data.len() + 12,
+            PTCPBody::Heartbeat => 12,
+            PTCPBody::Empty => 0,
         }
     }
 }
@@ -216,11 +229,7 @@ impl PTCPSession {
         /*
          * Update counters
          */
-        self.sent += match body {
-            PTCPBody::Command(ref c) => c.len() as u32,
-            PTCPBody::Payload(ref p) => p.data.len() as u32 + 12,
-            PTCPBody::Empty => 0,
-        };
+        self.sent += body.len() as u32;
 
         self.id += 1;
         self.count += match body {
@@ -232,6 +241,7 @@ impl PTCPSession {
                 }
             }
             PTCPBody::Payload(_) => 1,
+            PTCPBody::Heartbeat => 1,
             PTCPBody::Empty => 0,
         };
 
@@ -246,11 +256,7 @@ impl PTCPSession {
     }
 
     pub fn recv(&mut self, packet: PTCPPacket) -> PTCPPacket {
-        self.recv += match packet.body {
-            PTCPBody::Command(ref c) => c.len() as u32,
-            PTCPBody::Payload(ref p) => p.data.len() as u32 + 12,
-            PTCPBody::Empty => 0,
-        };
+        self.recv += packet.body.len() as u32;
         self.rmid = packet.lmid;
 
         packet
