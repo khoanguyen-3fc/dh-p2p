@@ -57,13 +57,13 @@ impl PTCPPayload {
         let realm = self.realm.to_be_bytes();
         let padding = 0u32.to_be_bytes();
 
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&header);
-        buf.extend_from_slice(&realm);
-        buf.extend_from_slice(&padding);
-        buf.extend_from_slice(&self.data);
-
-        buf
+        [
+            header.to_vec(),
+            realm.to_vec(),
+            padding.to_vec(),
+            self.data.clone(),
+        ]
+        .concat()
     }
 }
 
@@ -192,16 +192,16 @@ impl PTCPPacket {
     }
 
     fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(b"PTCP");
-        buf.extend_from_slice(&self.sent.to_be_bytes());
-        buf.extend_from_slice(&self.recv.to_be_bytes());
-        buf.extend_from_slice(&self.pid.to_be_bytes());
-        buf.extend_from_slice(&self.lmid.to_be_bytes());
-        buf.extend_from_slice(&self.rmid.to_be_bytes());
-        buf.extend_from_slice(&self.body.serialize());
-
-        buf
+        [
+            b"PTCP".to_vec(),
+            self.sent.to_be_bytes().to_vec(),
+            self.recv.to_be_bytes().to_vec(),
+            self.pid.to_be_bytes().to_vec(),
+            self.lmid.to_be_bytes().to_vec(),
+            self.rmid.to_be_bytes().to_vec(),
+            self.body.serialize(),
+        ]
+        .concat()
     }
 
     fn try_print_data(&self) {
