@@ -131,7 +131,7 @@ def main(serial, dtype=0, username=None, password=None, debug=False):
 
     main_remote.rhost = agent_server
     main_remote.rport = agent_port
-    # TODO: check timeout
+    # TODO check timeout
     res = main_remote.read()
 
     main_remote.request_ptcp(b"\x00\x03\x01\x00")
@@ -250,7 +250,7 @@ def main(serial, dtype=0, username=None, password=None, debug=False):
             if not ptcp_ready:
                 continue
 
-            # TODO: only simplex, need to implement duplex
+            # only simplex, duplex is not supported
             res = device_remote.read_ptcp()
             if len(res.body) == 0:
                 continue

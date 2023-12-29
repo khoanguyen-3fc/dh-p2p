@@ -81,7 +81,7 @@ async fn main() {
     let channels2 = channels.clone();
     let conn_channels2 = conn_channels.clone();
 
-    // TODO: implement duplex keepalive
+    // TODO implement duplex keepalive
     tokio::spawn(async move {
         dh_writer(session, writer, dh_rx, remote_port.into()).await;
     });

@@ -125,7 +125,7 @@ pub async fn p2p_handshake(
         .await;
 
     socket2.connect(agent).await.unwrap();
-    // TODO: check timeout
+    // TODO check timeout
     socket2.dh_read().await;
 
     let mut session = PTCPSession::new();
