@@ -18,6 +18,7 @@ pub enum PTCPBody {
     Sync,
     Command(Vec<u8>),
     Payload(PTCPPayload),
+    Status(u32, String),
     Heartbeat,
     Empty,
 }
@@ -96,6 +97,7 @@ impl std::fmt::Debug for PTCPBody {
                     .join(" ")
             ),
             PTCPBody::Payload(payload) => write!(f, "{:?}", payload),
+            PTCPBody::Status(realm, status) => write!(f, "Status(0x{:08x}, {})", realm, status),
             PTCPBody::Heartbeat => write!(f, "Heartbeat"),
             PTCPBody::Empty => write!(f, "Empty"),
         }
@@ -123,6 +125,11 @@ impl PTCPBody {
         match data[0] {
             0x00 => PTCPBody::Sync,
             0x10 => PTCPBody::Payload(PTCPPayload::parse(data)),
+            0x12 => {
+                let realm = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+                let status = String::from_utf8_lossy(&data[12..]).to_string();
+                PTCPBody::Status(realm, status)
+            }
             0x13 => PTCPBody::Heartbeat,
             _ => PTCPBody::Command(data.to_vec()),
         }
@@ -133,6 +140,14 @@ impl PTCPBody {
             PTCPBody::Sync => b"\x00\x03\x01\x00".to_vec(),
             PTCPBody::Command(data) => data.to_vec(),
             PTCPBody::Payload(payload) => payload.serialize(),
+            PTCPBody::Status(realm, status) => {
+                let mut buf = Vec::new();
+                buf.extend_from_slice(b"\x12\x00\x00\x00");
+                buf.extend_from_slice(&realm.to_be_bytes());
+                buf.extend_from_slice(b"\x00\x00\x00\x00");
+                buf.extend_from_slice(status.as_bytes());
+                buf
+            }
             PTCPBody::Heartbeat => b"\x13\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
             PTCPBody::Empty => Vec::new(),
         }
@@ -143,6 +158,7 @@ impl PTCPBody {
             PTCPBody::Sync => 4,
             PTCPBody::Command(data) => data.len(),
             PTCPBody::Payload(payload) => payload.data.len() + 12,
+            PTCPBody::Status(_, status) => status.len() + 12,
             PTCPBody::Heartbeat => 12,
             PTCPBody::Empty => 0,
         }

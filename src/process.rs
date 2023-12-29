@@ -92,15 +92,10 @@ pub async fn dh_writer(
                 socket.ptcp_request(p).await;
             }
             PTCPEvent::Disconnect(realm) => {
-                let p = session.lock().unwrap().send(PTCPBody::Command(
-                    [
-                        b"\x12\x00\x00\x00".to_vec(),
-                        realm.to_be_bytes().to_vec(),
-                        b"\x00\x00\x00\x00".to_vec(),
-                        b"DISC".to_vec(),
-                    ]
-                    .concat(),
-                ));
+                let p = session
+                    .lock()
+                    .unwrap()
+                    .send(PTCPBody::Status(realm, "DISC".to_string()));
                 socket.ptcp_request(p).await;
             }
             PTCPEvent::Data(realm, data) => {
@@ -135,21 +130,15 @@ pub async fn dh_reader(
         socket.ptcp_request(p).await;
 
         match packet.body {
-            PTCPBody::Command(c) => {
-                if c[0] == 0x12 {
-                    let realm = u32::from_be_bytes([c[4], c[5], c[6], c[7]]);
-                    let status = String::from_utf8_lossy(&c[12..]).to_string();
-                    println!("Realm {:08x} status: {}", realm, status);
-
-                    if status == "CONN" {
-                        conn_channels
-                            .lock()
-                            .unwrap()
-                            .remove(&realm)
-                            .unwrap()
-                            .send(true)
-                            .unwrap();
-                    }
+            PTCPBody::Status(realm, status) => {
+                if status == "CONN" {
+                    conn_channels
+                        .lock()
+                        .unwrap()
+                        .remove(&realm)
+                        .unwrap()
+                        .send(true)
+                        .unwrap();
                 }
             }
             PTCPBody::Payload(p) => {
