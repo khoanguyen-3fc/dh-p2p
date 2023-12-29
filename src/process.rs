@@ -74,6 +74,10 @@ pub async fn dh_writer(
         let ev = dh_rx.recv().await.unwrap();
 
         match ev {
+            PTCPEvent::Heartbeat => {
+                let p = session.lock().unwrap().send(PTCPBody::Heartbeat);
+                socket.ptcp_request(p).await;
+            }
             PTCPEvent::Connect(realm) => {
                 let p = session.lock().unwrap().send(PTCPBody::Command(
                     [

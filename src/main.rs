@@ -81,7 +81,14 @@ async fn main() {
     let channels2 = channels.clone();
     let conn_channels2 = conn_channels.clone();
 
-    // TODO implement duplex keepalive
+    let hb_tx = dh_tx.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            hb_tx.send(PTCPEvent::Heartbeat).await.unwrap();
+        }
+    });
+
     tokio::spawn(async move {
         dh_writer(session, writer, dh_rx, remote_port.into()).await;
     });
