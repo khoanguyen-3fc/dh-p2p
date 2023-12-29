@@ -130,9 +130,7 @@ pub async fn p2p_handshake(
 
     let mut session = PTCPSession::new();
 
-    socket2
-        .ptcp_request(session.send(PTCPBody::Command(b"\x00\x03\x01\x00".to_vec())))
-        .await;
+    socket2.ptcp_request(session.send(PTCPBody::Sync)).await;
     session.recv(socket2.ptcp_read().await);
 
     if relay_mode {
@@ -252,16 +250,9 @@ pub async fn p2p_handshake(
 
     let mut session = PTCPSession::new();
 
-    socket
-        .ptcp_request(session.send(PTCPBody::Command(b"\x00\x03\x01\x00".to_vec())))
-        .await;
+    socket.ptcp_request(session.send(PTCPBody::Sync)).await;
     let mut res = session.recv(socket.ptcp_read().await);
-    match res.body {
-        PTCPBody::Command(ref c) => {
-            assert_eq!(c, b"\x00\x03\x01\x00", "Invalid response");
-        }
-        _ => panic!("Invalid response"),
-    }
+    assert!(matches!(res.body, PTCPBody::Sync), "Invalid response");
 
     socket
         .ptcp_request(

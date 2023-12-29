@@ -15,6 +15,7 @@ pub struct PTCPPayload {
 }
 
 pub enum PTCPBody {
+    Sync,
     Command(Vec<u8>),
     Payload(PTCPPayload),
     Heartbeat,
@@ -85,6 +86,7 @@ impl std::fmt::Debug for PTCPPayload {
 impl std::fmt::Debug for PTCPBody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PTCPBody::Sync => write!(f, "Sync"),
             PTCPBody::Command(data) => write!(
                 f,
                 "Command([{}])",
@@ -119,6 +121,7 @@ impl PTCPBody {
         assert!(data.len() >= 4, "Invalid body");
 
         match data[0] {
+            0x00 => PTCPBody::Sync,
             0x10 => PTCPBody::Payload(PTCPPayload::parse(data)),
             0x13 => PTCPBody::Heartbeat,
             _ => PTCPBody::Command(data.to_vec()),
@@ -127,6 +130,7 @@ impl PTCPBody {
 
     fn serialize(&self) -> Vec<u8> {
         match self {
+            PTCPBody::Sync => b"\x00\x03\x01\x00".to_vec(),
             PTCPBody::Command(data) => data.to_vec(),
             PTCPBody::Payload(payload) => payload.serialize(),
             PTCPBody::Heartbeat => b"\x13\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
@@ -136,6 +140,7 @@ impl PTCPBody {
 
     fn len(&self) -> usize {
         match self {
+            PTCPBody::Sync => 4,
             PTCPBody::Command(data) => data.len(),
             PTCPBody::Payload(payload) => payload.data.len() + 12,
             PTCPBody::Heartbeat => 12,
@@ -211,17 +216,11 @@ impl PTCPSession {
     }
 
     pub fn send(&mut self, body: PTCPBody) -> PTCPPacket {
-        let is_ack = match body {
-            PTCPBody::Command(ref c) => c == b"\x00\x03\x01\x00",
-            _ => false,
-        };
-
         let sent = self.sent;
         let recv = self.recv;
-        let pid = if is_ack {
-            0x0002FFFF
-        } else {
-            0x0000FFFF - self.count
+        let pid = match body {
+            PTCPBody::Sync => 0x0002FFFF,
+            _ => 0x0000FFFF - self.count,
         };
         let lmid = self.id;
         let rmid = self.rmid;
@@ -233,16 +232,9 @@ impl PTCPSession {
 
         self.id += 1;
         self.count += match body {
-            PTCPBody::Command(_) => {
-                if is_ack {
-                    0
-                } else {
-                    1
-                }
-            }
-            PTCPBody::Payload(_) => 1,
-            PTCPBody::Heartbeat => 1,
+            PTCPBody::Sync => 0,
             PTCPBody::Empty => 0,
+            _ => 1,
         };
 
         PTCPPacket {
