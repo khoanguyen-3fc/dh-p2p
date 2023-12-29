@@ -79,16 +79,10 @@ pub async fn dh_writer(
                 socket.ptcp_request(p).await;
             }
             PTCPEvent::Connect(realm) => {
-                let p = session.lock().unwrap().send(PTCPBody::Command(
-                    [
-                        b"\x11\x00\x00\x00".to_vec(),
-                        realm.to_be_bytes().to_vec(),
-                        b"\x00\x00\x00\x00".to_vec(),
-                        remote_port.to_be_bytes().to_vec(),
-                        b"\x7f\x00\x00\x01".to_vec(),
-                    ]
-                    .concat(),
-                ));
+                let p = session
+                    .lock()
+                    .unwrap()
+                    .send(PTCPBody::Bind(realm, remote_port));
                 socket.ptcp_request(p).await;
             }
             PTCPEvent::Disconnect(realm) => {

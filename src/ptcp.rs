@@ -18,6 +18,7 @@ pub enum PTCPBody {
     Sync,
     Command(Vec<u8>),
     Payload(PTCPPayload),
+    Bind(u32, u32),
     Status(u32, String),
     Heartbeat,
     Empty,
@@ -97,6 +98,9 @@ impl std::fmt::Debug for PTCPBody {
                     .join(" ")
             ),
             PTCPBody::Payload(payload) => write!(f, "{:?}", payload),
+            PTCPBody::Bind(realm, port) => {
+                write!(f, "Bind {{ realm: 0x{:08x}, port: {} }}", realm, port)
+            }
             PTCPBody::Status(realm, status) => {
                 write!(f, "Status {{ realm: 0x{:08x}, status: {} }}", realm, status)
             }
@@ -127,6 +131,10 @@ impl PTCPBody {
         match data[0] {
             0x00 => PTCPBody::Sync,
             0x10 => PTCPBody::Payload(PTCPPayload::parse(data)),
+            0x11 => PTCPBody::Bind(
+                u32::from_be_bytes([data[4], data[5], data[6], data[7]]),
+                u32::from_be_bytes([data[12], data[13], data[14], data[15]]),
+            ),
             0x12 => {
                 let realm = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
                 let status = String::from_utf8_lossy(&data[12..]).to_string();
@@ -142,6 +150,14 @@ impl PTCPBody {
             PTCPBody::Sync => b"\x00\x03\x01\x00".to_vec(),
             PTCPBody::Command(data) => data.to_vec(),
             PTCPBody::Payload(payload) => payload.serialize(),
+            PTCPBody::Bind(realm, port) => [
+                b"\x11\x00\x00\x00".to_vec(),
+                realm.to_be_bytes().to_vec(),
+                b"\x00\x00\x00\x00".to_vec(),
+                port.to_be_bytes().to_vec(),
+                b"\x7f\x00\x00\x01".to_vec(),
+            ]
+            .concat(),
             PTCPBody::Status(realm, status) => [
                 b"\x12\x00\x00\x00".to_vec(),
                 realm.to_be_bytes().to_vec(),
@@ -159,6 +175,7 @@ impl PTCPBody {
             PTCPBody::Sync => 4,
             PTCPBody::Command(data) => data.len(),
             PTCPBody::Payload(payload) => payload.data.len() + 12,
+            PTCPBody::Bind(_, _) => 20,
             PTCPBody::Status(_, status) => status.len() + 12,
             PTCPBody::Heartbeat => 12,
             PTCPBody::Empty => 0,
