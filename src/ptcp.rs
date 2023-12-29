@@ -97,7 +97,9 @@ impl std::fmt::Debug for PTCPBody {
                     .join(" ")
             ),
             PTCPBody::Payload(payload) => write!(f, "{:?}", payload),
-            PTCPBody::Status(realm, status) => write!(f, "Status(0x{:08x}, {})", realm, status),
+            PTCPBody::Status(realm, status) => {
+                write!(f, "Status {{ realm: 0x{:08x}, status: {} }}", realm, status)
+            }
             PTCPBody::Heartbeat => write!(f, "Heartbeat"),
             PTCPBody::Empty => write!(f, "Empty"),
         }
