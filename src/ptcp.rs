@@ -142,14 +142,13 @@ impl PTCPBody {
             PTCPBody::Sync => b"\x00\x03\x01\x00".to_vec(),
             PTCPBody::Command(data) => data.to_vec(),
             PTCPBody::Payload(payload) => payload.serialize(),
-            PTCPBody::Status(realm, status) => {
-                let mut buf = Vec::new();
-                buf.extend_from_slice(b"\x12\x00\x00\x00");
-                buf.extend_from_slice(&realm.to_be_bytes());
-                buf.extend_from_slice(b"\x00\x00\x00\x00");
-                buf.extend_from_slice(status.as_bytes());
-                buf
-            }
+            PTCPBody::Status(realm, status) => [
+                b"\x12\x00\x00\x00".to_vec(),
+                realm.to_be_bytes().to_vec(),
+                b"\x00\x00\x00\x00".to_vec(),
+                status.as_bytes().to_vec(),
+            ]
+            .concat(),
             PTCPBody::Heartbeat => b"\x13\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
             PTCPBody::Empty => Vec::new(),
         }
