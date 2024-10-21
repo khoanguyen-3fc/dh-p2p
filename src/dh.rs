@@ -9,8 +9,8 @@ use crate::ptcp::{PTCPBody, PTCPSession, PTCP};
 
 static MAIN_SERVER: &str = "www.easy4ipcloud.com:8800";
 
-static USERNAME: &str = "P2PClient";
-static USERKEY: &str = "YXQ3Mahe-5H-R1Z_";
+static USERNAME: &str = "cba1b29e32cb17aa46b8ff9e73c7f40b";
+static USERKEY: &str = "996103384cdf19179e19243e959bbf8b";
 
 fn ip_to_bytes(ip: &str) -> Vec<u8> {
     let addr: SocketAddrV4 = ip.parse().unwrap();

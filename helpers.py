@@ -19,8 +19,8 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 MAIN_SERVER = "www.easy4ipcloud.com"
 MAIN_PORT = 8800
 
-USERNAME = "P2PClient"
-USERKEY = "YXQ3Mahe-5H-R1Z_"
+USERNAME = "cba1b29e32cb17aa46b8ff9e73c7f40b"
+USERKEY = "996103384cdf19179e19243e959bbf8b"
 RANDSALT = "5daf91fc5cfc1be8e081cfb08f792726"
 IV = b"2z52*lk9o6HRyJrf"
 
