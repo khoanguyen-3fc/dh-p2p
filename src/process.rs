@@ -68,7 +68,6 @@ pub async fn dh_writer(
     session: Arc<Mutex<PTCPSession>>,
     socket: Arc<UdpSocket>,
     mut dh_rx: mpsc::Receiver<PTCPEvent>,
-    remote_port: u32,
 ) {
     loop {
         let ev = dh_rx.recv().await.unwrap();
@@ -78,7 +77,7 @@ pub async fn dh_writer(
                 let p = session.lock().unwrap().send(PTCPBody::Heartbeat);
                 socket.ptcp_request(p).await;
             }
-            PTCPEvent::Connect(realm) => {
+            PTCPEvent::Connect(realm, remote_port) => {
                 let p = session
                     .lock()
                     .unwrap()
