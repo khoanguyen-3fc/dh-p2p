@@ -276,9 +276,12 @@ pub async fn p2p_handshake(
     };
     let device_laddr = &device_laddr;
     let device = &data["body/PubAddr"];
+    let device_addr: std::net::SocketAddr =
+        device.parse().expect("device PubAddr not a valid address");
 
-    // not necessary when relay_mode is true, but UDP is connectionless
-    socket.connect(device).await.unwrap();
+    // `socket` is deliberately left unconnected here -- see the port scan
+    // below, once cookie/trans_id are known, which needs to target
+    // several candidate peers rather than exactly one connected one.
 
     socket2.connect(MAIN_SERVER).await.unwrap();
 
@@ -359,41 +362,101 @@ pub async fn p2p_handshake(
     let trans_id: [u8; 12] = rand::random();
     let cid: Vec<u8> = cid.iter().map(|b| !b).collect();
 
-    println!(">>> {}", socket.peer_addr().unwrap());
-    let data = [
-        b"\xff\xfe\xff\xe7".to_vec(),
-        cookie.to_vec(),
-        trans_id.to_vec(),
-        b"\x7f\xd5\xff\xf7".to_vec(),
-        cid.clone(),
-        b"\xff\xfb\xff\xf7\xff\xfe".to_vec(),
-        ip_to_bytes(&device),
-    ]
-    .concat();
+    // A real client doesn't trust PubAddr's exact port -- a NAT on the
+    // relay server's side (or on the device's own connection to it) can
+    // remap it, so a single-port probe here often just times out even
+    // with fully correct credentials. A real client instead fires this
+    // same "\xff\xfe\xff\xe7" probe at a cluster of ports around
+    // PubAddr's, and takes whichever answers first with "\xfe\xfe\xff\xe7".
+    //
+    // The trailing 6 bytes are not a fixed "device" address baked in
+    // once -- byte-for-byte comparison against a real session showed
+    // they encode ip_to_bytes() of the exact candidate address each
+    // individual packet is sent to (the last 4 bytes, the inverted IP,
+    // stay constant across candidates targeting the same host; the
+    // first 2, the inverted port, change to match each candidate port).
+    // Sending the same fixed encoding to every candidate reads as a
+    // garbage/mismatched target to any peer other than the very first
+    // one tried, so it's rebuilt per candidate port instead of once.
+    let base_port = device_addr.port() as i32;
+    // Range picked from a real hole-punch sequence: observed candidate
+    // offsets relative to PubAddr's port ran from -18 to +9 for one
+    // session and up to -25 for another -- comfortably covered by -25..15.
+    let candidate_ports: Vec<u16> = (-25..=15)
+        .filter_map(|offset| {
+            let p = base_port + offset;
+            if p > 0 && p <= 65535 {
+                Some(p as u16)
+            } else {
+                None
+            }
+        })
+        .collect();
+
     println!(
-        "Raw [{}]",
-        data.iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ")
+        "Probing {} candidate ports around {} for the device's real NAT mapping...",
+        candidate_ports.len(),
+        device_addr
     );
-    socket.send(&data).await.unwrap();
-    println!("---");
 
-    println!("<<< {}", socket.peer_addr().unwrap());
     let mut buf = [0u8; 4096];
+    let mut confirmed: Option<std::net::SocketAddr> = None;
+    let mut n = 0usize;
 
-    let result = time::timeout(time::Duration::from_secs(5), socket.recv(&mut buf)).await;
+    'attempts: for attempt in 0..3 {
+        for &port in &candidate_ports {
+            let addr = std::net::SocketAddr::new(device_addr.ip(), port);
+            let data = [
+                b"\xff\xfe\xff\xe7".to_vec(),
+                cookie.to_vec(),
+                trans_id.to_vec(),
+                b"\x7f\xd5\xff\xf7".to_vec(),
+                cid.clone(),
+                b"\xff\xfb\xff\xf7\xff\xfe".to_vec(),
+                ip_to_bytes(&addr.to_string()),
+            ]
+            .concat();
+            let _ = socket.send_to(&data, addr).await;
+        }
 
-    if result.is_err() {
-        println!("Timeout occurred while waiting for a response from the device.");
-        println!(
-            "If the issue persists, you may need to use relay mode (--relay) with this device."
-        );
-        panic!("Timeout");
+        for _ in 0..20 {
+            match time::timeout(time::Duration::from_millis(150), socket.recv_from(&mut buf))
+                .await
+            {
+                Ok(Ok((len, from))) if len >= 4 && buf[0..4] == [0xfe, 0xfe, 0xff, 0xe7] => {
+                    confirmed = Some(from);
+                    n = len;
+                    break 'attempts;
+                }
+                Ok(Ok((len, from))) if len >= 4 && buf[0..4] == [0xff, 0xfe, 0xff, 0xe7] => {
+                    // The device's own probe arriving here means the hole
+                    // is punched even without an explicit ack from it.
+                    println!("Got the device's own probe from {} (len={})", from, len);
+                    confirmed = Some(from);
+                    n = len;
+                    break 'attempts;
+                }
+                Ok(Ok((_, from))) => {
+                    println!("Unrelated datagram from {}, ignored", from);
+                }
+                _ => continue,
+            }
+        }
+
+        println!("No answer on round {}, retrying...", attempt + 1);
     }
 
-    let n = result.unwrap().unwrap();
+    let device_addr = confirmed.unwrap_or_else(|| {
+        panic!(
+            "No response from device on any of {} candidate ports around {}. \
+             You may need to use relay mode (--relay) with this device.",
+            candidate_ports.len(),
+            device_addr
+        )
+    });
+
+    socket.connect(device_addr).await.unwrap();
+    println!("Device confirmed at {}", device_addr);
     println!(
         "Raw [{}]",
         buf[0..n]

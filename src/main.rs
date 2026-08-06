@@ -64,10 +64,43 @@ async fn main() {
         .await
         .unwrap();
 
-    let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+    // Retry the whole handshake from scratch on failure, rather than just
+    // re-probing candidate ports within one attempt. A real client
+    // re-runs its full poll cycle (p2p-channel -> relay-channel -> agent)
+    // independently several times when one attempt doesn't pan out, each
+    // time getting a fresh PubAddr from the relay server -- a stale
+    // PubAddr from a failed attempt isn't reused. p2p_handshake panics on
+    // failure (hole-punch exhausted, bad auth, etc.); catch that via a
+    // spawned task rather than restructuring it to return a Result, and
+    // start over with a brand new UDP socket each time so nothing from a
+    // failed attempt carries over.
+    let max_attempts = 5;
+    let mut attempt = 0;
+    let (socket, session) = loop {
+        attempt += 1;
+        let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+        let serial = serial.clone();
+        let relay = args.relay;
+        let username = args.username.clone();
+        let password = args.password.clone();
 
-    let (socket, session) =
-        p2p_handshake(socket, serial, args.relay, args.username, args.password).await;
+        let handle = tokio::spawn(async move {
+            p2p_handshake(socket, serial, relay, username, password).await
+        });
+
+        match handle.await {
+            Ok(result) => break result,
+            Err(e) if attempt < max_attempts => {
+                println!(
+                    "Handshake attempt {}/{} failed ({}) -- retrying with a fresh session...",
+                    attempt, max_attempts, e
+                );
+            }
+            Err(e) => {
+                panic!("Handshake failed after {} attempts: {}", max_attempts, e);
+            }
+        }
+    };
 
     let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
     let session = Arc::new(Mutex::new(session));
