@@ -244,7 +244,13 @@ impl PTCPSession {
             sent: 0,
             recv: 0,
             count: 0,
-            id: 0,
+            // A real client's very first packet starts from a large,
+            // effectively-random lmid, never 0. The protocol itself
+            // doesn't care about the starting value (peers just echo
+            // back whatever lmid they receive as rmid), but always
+            // starting at the same fixed value is an easy scripted-client
+            // fingerprint to avoid for free.
+            id: rand::random(),
             rmid: 0,
         }
     }
@@ -293,6 +299,16 @@ impl PTCPSession {
 pub trait PTCP {
     async fn ptcp_request(&self, packet: PTCPPacket);
     async fn ptcp_read(&self) -> PTCPPacket;
+    /// Like `ptcp_read`, but tolerant of datagrams that aren't PTCP-framed
+    /// at all. Once a tunnel is bound, some devices reply with the
+    /// tunneled application's raw bytes directly over the relay path
+    /// (observed against a real device over RTSP: after `Bind`, it
+    /// replied with a datagram starting "HTTP/1.1 200 OK..." -- no
+    /// "PTCP" envelope, sent/recv/pid/lmid/rmid fields, or `Payload`
+    /// wrapper). `ptcp_read` treats that as corruption and panics; this
+    /// instead returns it as `Err(raw_bytes)` for the caller to forward
+    /// directly.
+    async fn ptcp_read_or_raw(&self) -> Result<PTCPPacket, Vec<u8>>;
 }
 
 #[async_trait]
@@ -320,5 +336,30 @@ impl PTCP for UdpSocket {
         println!("---");
 
         packet
+    }
+
+    async fn ptcp_read_or_raw(&self) -> Result<PTCPPacket, Vec<u8>> {
+        println!("### {}", self.peer_addr().unwrap());
+
+        let mut buf = [0u8; 4096];
+        let n = self.recv(&mut buf).await.unwrap();
+
+        if n < 4 || &buf[0..4] != b"PTCP" {
+            println!(
+                "<<< {} (raw, no PTCP envelope, len={})",
+                self.peer_addr().unwrap(),
+                n
+            );
+            println!("---");
+            return Err(buf[0..n].to_vec());
+        }
+
+        println!("<<< {}", self.peer_addr().unwrap());
+        let packet = PTCPPacket::parse(&buf[0..n]);
+        println!("{:?}", packet);
+        packet.try_print_data();
+        println!("---");
+
+        Ok(packet)
     }
 }

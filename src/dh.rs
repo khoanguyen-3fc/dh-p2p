@@ -6,7 +6,7 @@ use std::{collections::HashMap, net::SocketAddrV4};
 use tokio::{net::UdpSocket, time};
 use xml::reader::{EventReader, XmlEvent};
 
-use crate::ptcp::{PTCPBody, PTCPSession, PTCP};
+use crate::ptcp::{PTCPBody, PTCPPacket, PTCPSession, PTCP};
 
 static MAIN_SERVER: &str = "www.easy4ipcloud.com:8800";
 
@@ -304,13 +304,28 @@ pub async fn p2p_handshake(
         .await;
 
     socket2.connect(agent).await.unwrap();
-    // TODO check timeout
-    socket2.dh_read().await;
+    // The relay server doesn't always answer this one -- don't let a
+    // silent agent block the handshake forever, just proceed without it.
+    match time::timeout(time::Duration::from_secs(3), socket2.dh_read_raw()).await {
+        Ok(res) => println!("relay-channel ack: {:?}", res),
+        Err(_) => println!("No relay-channel ack within 3s -- proceeding anyway."),
+    }
 
     let mut session = PTCPSession::new();
 
     socket2.ptcp_request(session.send(PTCPBody::Sync)).await;
-    session.recv(socket2.ptcp_read().await);
+
+    // None of the reads on this socket had a timeout before, so a dead
+    // agent connection could hang the whole handshake indefinitely.
+    // Bound each one and let the caller decide whether/how to retry.
+    async fn read_bounded(socket: &UdpSocket) -> PTCPPacket {
+        match time::timeout(time::Duration::from_secs(6), socket.ptcp_read()).await {
+            Ok(packet) => packet,
+            Err(_) => panic!("No response from agent within 6s"),
+        }
+    }
+
+    session.recv(read_bounded(&socket2).await);
 
     if relay_mode {
         return (socket2, session);
@@ -321,10 +336,10 @@ pub async fn p2p_handshake(
             b"\x17\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
         )))
         .await;
-    let mut res = session.recv(socket2.ptcp_read().await);
+    let mut res = session.recv(read_bounded(&socket2).await);
 
     while let PTCPBody::Empty = res.body {
-        res = session.recv(socket2.ptcp_read().await);
+        res = session.recv(read_bounded(&socket2).await);
     }
 
     let sign = match res.body {
@@ -560,9 +575,14 @@ trait DHP2P {
 #[async_trait]
 impl DHP2P for UdpSocket {
     async fn dh_request(&self, path: &str, body: Option<&str>, seq: &mut u32) {
+        // A real DMSS client uses "NFGET"/"NFPOST", not "DHGET"/"DHPOST",
+        // and sends the three extra headers below. Both still work either
+        // way against the servers tested against, but matching what the
+        // real app sends is one less variable when a device/server starts
+        // behaving unexpectedly.
         let method = match body {
-            Some(_) => "DHPOST",
-            None => "DHGET",
+            Some(_) => "NFPOST",
+            None => "NFGET",
         };
 
         let body = match body {
@@ -586,6 +606,9 @@ impl DHP2P for UdpSocket {
 
         let req = format!("\
             {} {} HTTP/1.1\r\n\
+            X-Version: 6.7.15\r\n\
+            X-Sversion: 1.1.0\r\n\
+            X-ToUType: Client/Dmss_Android\r\n\
             CSeq: {}\r\n\
             Authorization: WSSE profile=\"UsernameToken\"\r\n\
             X-WSSE: UsernameToken Username=\"{}\", PasswordDigest=\"{}\", Nonce=\"{}\", Created=\"{}\"\r\n\r\n{}",
