@@ -1,16 +1,124 @@
 use async_trait::async_trait;
 use base64::Engine;
+use hmac::Mac;
 use sha1::Digest;
 use std::{collections::HashMap, net::SocketAddrV4};
 use tokio::{net::UdpSocket, time};
 use xml::reader::{EventReader, XmlEvent};
 
-use crate::ptcp::{PTCPBody, PTCPSession, PTCP};
+use crate::ptcp::{PTCPBody, PTCPPacket, PTCPSession, PTCP};
 
 static MAIN_SERVER: &str = "www.easy4ipcloud.com:8800";
 
 static USERNAME: &str = "cba1b29e32cb17aa46b8ff9e73c7f40b";
 static USERKEY: &str = "996103384cdf19179e19243e959bbf8b";
+
+// Fixed IV for the session-key-derived AES cipher below. The <Info>
+// payload of /info/device uses its own separate, fully fixed key+IV
+// shared by every device instead of a derived session key.
+static SESSION_IV: &[u8; 16] = b"2z52*lk9o6HRyJrf";
+static INFO_KEY: &[u8; 32] = b"kRjmsUB&ezmdGLL67H#$ojw@XflcaIaf";
+static INFO_IV: &[u8; 16] = b"MydvJw*Iw1w&i^kk";
+
+type AesOfb = ofb::Ofb<aes::Aes256>;
+
+fn to_hex_upper(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02X}", b)).collect()
+}
+
+/// Decrypt the <Info> payload of /info/device/{serial} and pull out
+/// "randsalt". Devices whose firmware doesn't report info answer with an
+/// empty element; those have no salt and expect the auth body to omit
+/// <RandSalt> entirely rather than send it empty.
+fn get_device_info_randsalt(info_b64: &str) -> Option<String> {
+    if info_b64.is_empty() {
+        return None;
+    }
+
+    let encrypted = base64::engine::general_purpose::STANDARD
+        .decode(info_b64)
+        .ok()?;
+    let mut buf = encrypted;
+    let mut cipher = <AesOfb as ofb::cipher::KeyIvInit>::new(INFO_KEY.into(), INFO_IV.into());
+    ofb::cipher::StreamCipher::apply_keystream(&mut cipher, &mut buf);
+    let text = String::from_utf8(buf).ok()?;
+
+    // The separator between the key and its value is a tab, not a bare
+    // colon ("randsalt":\t"..."), so anchor on the key then skip to the
+    // next quoted string rather than assuming exact adjacency.
+    let key_pos = text.find("\"randsalt\"")? + "\"randsalt\"".len();
+    let rest = &text[key_pos..];
+    let start = rest.find('"')? + 1;
+    let end = rest[start..].find('"')? + start;
+    Some(rest[start..end].to_string())
+}
+
+/// MD5("{username}:Login to {randsalt}:{password}"), hex-uppercased --
+/// the per-device session key that both the LocalAddr encryption and the
+/// channel-creation auth digest are derived from.
+fn get_key(username: &str, password: &str, randsalt: &str) -> Vec<u8> {
+    let msg = format!("{}:Login to {}:{}", username, randsalt, password);
+    let digest = md5::Md5::digest(msg.as_bytes());
+    to_hex_upper(&digest).into_bytes()
+}
+
+/// AES-256-OFB-encrypt `data` under a PBKDF2-HMAC-SHA256(key, nonce, 20000,
+/// 32) derived key, base64-encoded -- used for the LocalAddr field in the
+/// p2p-channel/relay-channel request bodies below.
+fn get_enc(key: &[u8], nonce: u32, data: &str) -> String {
+    let salt = nonce.to_string();
+    let mut dk = [0u8; 32];
+    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(key, salt.as_bytes(), 20000, &mut dk);
+
+    let mut buf = data.as_bytes().to_vec();
+    let mut cipher = <AesOfb as ofb::cipher::KeyIvInit>::new(&dk.into(), SESSION_IV.into());
+    ofb::cipher::StreamCipher::apply_keystream(&mut cipher, &mut buf);
+
+    base64::engine::general_purpose::STANDARD.encode(buf)
+}
+
+/// Builds the <CreateDate>/<DevAuth>/<Nonce>/<RandSalt>/<UserName> block a
+/// device expects in the p2p-channel/relay-channel body when it demands
+/// auth. DevAuth = base64(HMAC-SHA256(key, "{nonce}{curdate}{payload}"))
+/// where payload is the (already-encrypted) LocalAddr string, or empty
+/// for calls that don't carry one.
+fn get_auth(username: &str, key: &[u8], nonce: u32, randsalt: &str, payload: &str) -> String {
+    let curdate = chrono::Utc::now().timestamp();
+    let message = format!("{}{}{}", nonce, curdate, payload);
+
+    type HmacSha256 = hmac::Hmac<sha2::Sha256>;
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
+    mac.update(message.as_bytes());
+    let result = mac.finalize().into_bytes();
+    let auth = base64::engine::general_purpose::STANDARD.encode(result);
+
+    let salt = if randsalt.is_empty() {
+        String::new()
+    } else {
+        format!("<RandSalt>{}</RandSalt>", randsalt)
+    };
+
+    format!(
+        "<CreateDate>{}</CreateDate><DevAuth>{}</DevAuth><Nonce>{}</Nonce>{}<UserName>{}</UserName>",
+        curdate, auth, nonce, salt, username
+    )
+}
+
+/// Inverse of get_enc: OFB is a stream cipher, so decrypting is the same
+/// keystream XOR, just base64-decoding first instead of encoding after.
+fn get_dec(key: &[u8], nonce: u32, data: &str) -> String {
+    let salt = nonce.to_string();
+    let mut dk = [0u8; 32];
+    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(key, salt.as_bytes(), 20000, &mut dk);
+
+    let mut buf = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .expect("device sent invalid base64 LocalAddr");
+    let mut cipher = <AesOfb as ofb::cipher::KeyIvInit>::new(&dk.into(), SESSION_IV.into());
+    ofb::cipher::StreamCipher::apply_keystream(&mut cipher, &mut buf);
+
+    String::from_utf8(buf).expect("decrypted LocalAddr was not valid UTF-8 -- wrong password?")
+}
 
 fn ip_to_bytes(ip: &str) -> Vec<u8> {
     let addr: SocketAddrV4 = ip.parse().unwrap();
@@ -28,6 +136,8 @@ pub async fn p2p_handshake(
     socket: UdpSocket,
     serial: String,
     relay_mode: bool,
+    username: Option<String>,
+    password: Option<String>,
 ) -> (UdpSocket, PTCPSession) {
     let mut cseq = 0;
 
@@ -60,28 +170,64 @@ pub async fn p2p_handshake(
         .await;
     socket2.dh_read().await;
 
-    /*
-    TODO add support for device info request
-    socket2
-        .dh_request(
-            format!("/info/device/{}", serial).as_ref(),
-            None,
-            &mut cseq,
-        )
-        .await;
-    socket2.dh_read().await;
-    */
+    // The salt is only needed to authenticate the channel setup, so a
+    // device/cloud that won't answer here (no credentials given, or
+    // firmware reports no info) must not take the whole handshake down
+    // with it.
+    let randsalt = if username.is_some() && password.is_some() {
+        socket2
+            .dh_request(
+                format!("/info/device/{}", serial).as_ref(),
+                None,
+                &mut cseq,
+            )
+            .await;
+        let info = socket2
+            .dh_read_raw()
+            .await
+            .body
+            .and_then(|b| b.get("body/Info").cloned());
+        info.and_then(|i| get_device_info_randsalt(&i))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     let cid: [u8; 8] = rand::random();
+    let cid_str = cid
+        .iter()
+        .map(|b| format!("{:x}", b))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let laddr_plain = format!("127.0.0.1:{}", socket.local_addr().unwrap().port());
+
+    // Same key and nonce are reused for the relay-channel auth further
+    // down, so both computed once here rather than twice.
+    let session_key: Option<Vec<u8>> = match (&username, &password) {
+        (Some(user), Some(pass)) => Some(get_key(user, pass, &randsalt)),
+        _ => None,
+    };
+    let session_nonce: u32 = rand::random();
+
+    let channel_body = match (&username, &session_key) {
+        (Some(user), Some(key)) => {
+            let laddr_enc = get_enc(key, session_nonce, &laddr_plain);
+            let auth = get_auth(user, key, session_nonce, &randsalt, &laddr_enc);
+            format!(
+                "<body>{}<Identify>{}</Identify><IpEncrptV2>true</IpEncrptV2><LocalAddr>{}</LocalAddr><version>5.0.0</version></body>",
+                auth, cid_str, laddr_enc,
+            )
+        }
+        _ => format!(
+            "<body><Identify>{}</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>{}</LocalAddr><version>5.0.0</version></body>",
+            cid_str, laddr_plain,
+        ),
+    };
 
     socket
         .dh_request(
             format!("/device/{}/p2p-channel", serial).as_ref(),
-            Some(format!(
-                "<body><Identify>{}</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>127.0.0.1:{}</LocalAddr><version>5.0.0</version></body>",
-                cid.iter().map(|b| format!("{:x}", b)).collect::<Vec<_>>().join(" "),
-                socket.local_addr().unwrap().port(),
-            ).as_ref()),
+            Some(channel_body.as_ref()),
             &mut cseq,
         )
         .await;
@@ -111,39 +257,78 @@ pub async fn p2p_handshake(
     }
 
     if res.code >= 400 {
-        if res.code == 403 {
+        if res.code == 403 && session_key.is_none() {
             println!("Device requires authentication when creating P2P channel.");
-            println!("Authentication is not supported at this time.");
+            println!("Retry with --username and --password.");
         }
 
         panic!("Error response: {}", res.status);
     }
 
     let data = res.body.unwrap();
-    let device_laddr = &data["body/LocalAddr"];
+    let device_laddr_raw = &data["body/LocalAddr"];
+    let device_laddr = match &session_key {
+        Some(key) => {
+            let nonce: u32 = data["body/Nonce"].parse().unwrap();
+            get_dec(key, nonce, device_laddr_raw)
+        }
+        None => device_laddr_raw.clone(),
+    };
+    let device_laddr = &device_laddr;
     let device = &data["body/PubAddr"];
+    let device_addr: std::net::SocketAddr =
+        device.parse().expect("device PubAddr not a valid address");
 
-    // not necessary when relay_mode is true, but UDP is connectionless
-    socket.connect(device).await.unwrap();
+    // `socket` is deliberately left unconnected here -- see the port scan
+    // below, once cookie/trans_id are known, which needs to target
+    // several candidate peers rather than exactly one connected one.
 
     socket2.connect(MAIN_SERVER).await.unwrap();
+
+    // Some devices require auth here too, on top of the p2p-channel step
+    // -- same key and nonce, but no LocalAddr payload to encrypt.
+    let relay_auth = match (&username, &session_key) {
+        (Some(user), Some(key)) => get_auth(user, key, session_nonce, &randsalt, ""),
+        _ => String::new(),
+    };
 
     socket2
         .dh_request(
             format!("/device/{}/relay-channel", serial).as_ref(),
-            Some(format!("<body><agentAddr>{}</agentAddr></body>", agent).as_ref()),
+            Some(
+                format!(
+                    "<body>{}<agentAddr>{}</agentAddr></body>",
+                    relay_auth, agent
+                )
+                .as_ref(),
+            ),
             &mut cseq,
         )
         .await;
 
     socket2.connect(agent).await.unwrap();
-    // TODO check timeout
-    socket2.dh_read().await;
+    // The relay server doesn't always answer this one -- don't let a
+    // silent agent block the handshake forever, just proceed without it.
+    match time::timeout(time::Duration::from_secs(3), socket2.dh_read_raw()).await {
+        Ok(res) => println!("relay-channel ack: {:?}", res),
+        Err(_) => println!("No relay-channel ack within 3s -- proceeding anyway."),
+    }
 
     let mut session = PTCPSession::new();
 
     socket2.ptcp_request(session.send(PTCPBody::Sync)).await;
-    session.recv(socket2.ptcp_read().await);
+
+    // None of the reads on this socket had a timeout before, so a dead
+    // agent connection could hang the whole handshake indefinitely.
+    // Bound each one and let the caller decide whether/how to retry.
+    async fn read_bounded(socket: &UdpSocket) -> PTCPPacket {
+        match time::timeout(time::Duration::from_secs(6), socket.ptcp_read()).await {
+            Ok(packet) => packet,
+            Err(_) => panic!("No response from agent within 6s"),
+        }
+    }
+
+    session.recv(read_bounded(&socket2).await);
 
     if relay_mode {
         return (socket2, session);
@@ -154,10 +339,10 @@ pub async fn p2p_handshake(
             b"\x17\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
         )))
         .await;
-    let mut res = session.recv(socket2.ptcp_read().await);
+    let mut res = session.recv(read_bounded(&socket2).await);
 
     while let PTCPBody::Empty = res.body {
-        res = session.recv(socket2.ptcp_read().await);
+        res = session.recv(read_bounded(&socket2).await);
     }
 
     let sign = match res.body {
@@ -177,41 +362,101 @@ pub async fn p2p_handshake(
     let trans_id: [u8; 12] = rand::random();
     let cid: Vec<u8> = cid.iter().map(|b| !b).collect();
 
-    println!(">>> {}", socket.peer_addr().unwrap());
-    let data = [
-        b"\xff\xfe\xff\xe7".to_vec(),
-        cookie.to_vec(),
-        trans_id.to_vec(),
-        b"\x7f\xd5\xff\xf7".to_vec(),
-        cid.clone(),
-        b"\xff\xfb\xff\xf7\xff\xfe".to_vec(),
-        ip_to_bytes(&device),
-    ]
-    .concat();
+    // A real client doesn't trust PubAddr's exact port -- a NAT on the
+    // relay server's side (or on the device's own connection to it) can
+    // remap it, so a single-port probe here often just times out even
+    // with fully correct credentials. A real client instead fires this
+    // same "\xff\xfe\xff\xe7" probe at a cluster of ports around
+    // PubAddr's, and takes whichever answers first with "\xfe\xfe\xff\xe7".
+    //
+    // The trailing 6 bytes are not a fixed "device" address baked in
+    // once -- byte-for-byte comparison against a real session showed
+    // they encode ip_to_bytes() of the exact candidate address each
+    // individual packet is sent to (the last 4 bytes, the inverted IP,
+    // stay constant across candidates targeting the same host; the
+    // first 2, the inverted port, change to match each candidate port).
+    // Sending the same fixed encoding to every candidate reads as a
+    // garbage/mismatched target to any peer other than the very first
+    // one tried, so it's rebuilt per candidate port instead of once.
+    let base_port = device_addr.port() as i32;
+    // Range picked from a real hole-punch sequence: observed candidate
+    // offsets relative to PubAddr's port ran from -18 to +9 for one
+    // session and up to -25 for another -- comfortably covered by -25..15.
+    let candidate_ports: Vec<u16> = (-25..=15)
+        .filter_map(|offset| {
+            let p = base_port + offset;
+            if p > 0 && p <= 65535 {
+                Some(p as u16)
+            } else {
+                None
+            }
+        })
+        .collect();
+
     println!(
-        "Raw [{}]",
-        data.iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ")
+        "Probing {} candidate ports around {} for the device's real NAT mapping...",
+        candidate_ports.len(),
+        device_addr
     );
-    socket.send(&data).await.unwrap();
-    println!("---");
 
-    println!("<<< {}", socket.peer_addr().unwrap());
     let mut buf = [0u8; 4096];
+    let mut confirmed: Option<std::net::SocketAddr> = None;
+    let mut n = 0usize;
 
-    let result = time::timeout(time::Duration::from_secs(5), socket.recv(&mut buf)).await;
+    'attempts: for attempt in 0..3 {
+        for &port in &candidate_ports {
+            let addr = std::net::SocketAddr::new(device_addr.ip(), port);
+            let data = [
+                b"\xff\xfe\xff\xe7".to_vec(),
+                cookie.to_vec(),
+                trans_id.to_vec(),
+                b"\x7f\xd5\xff\xf7".to_vec(),
+                cid.clone(),
+                b"\xff\xfb\xff\xf7\xff\xfe".to_vec(),
+                ip_to_bytes(&addr.to_string()),
+            ]
+            .concat();
+            let _ = socket.send_to(&data, addr).await;
+        }
 
-    if result.is_err() {
-        println!("Timeout occurred while waiting for a response from the device.");
-        println!(
-            "If the issue persists, you may need to use relay mode (--relay) with this device."
-        );
-        panic!("Timeout");
+        for _ in 0..20 {
+            match time::timeout(time::Duration::from_millis(150), socket.recv_from(&mut buf))
+                .await
+            {
+                Ok(Ok((len, from))) if len >= 4 && buf[0..4] == [0xfe, 0xfe, 0xff, 0xe7] => {
+                    confirmed = Some(from);
+                    n = len;
+                    break 'attempts;
+                }
+                Ok(Ok((len, from))) if len >= 4 && buf[0..4] == [0xff, 0xfe, 0xff, 0xe7] => {
+                    // The device's own probe arriving here means the hole
+                    // is punched even without an explicit ack from it.
+                    println!("Got the device's own probe from {} (len={})", from, len);
+                    confirmed = Some(from);
+                    n = len;
+                    break 'attempts;
+                }
+                Ok(Ok((_, from))) => {
+                    println!("Unrelated datagram from {}, ignored", from);
+                }
+                _ => continue,
+            }
+        }
+
+        println!("No answer on round {}, retrying...", attempt + 1);
     }
 
-    let n = result.unwrap().unwrap();
+    let device_addr = confirmed.unwrap_or_else(|| {
+        panic!(
+            "No response from device on any of {} candidate ports around {}. \
+             You may need to use relay mode (--relay) with this device.",
+            candidate_ports.len(),
+            device_addr
+        )
+    });
+
+    socket.connect(device_addr).await.unwrap();
+    println!("Device confirmed at {}", device_addr);
     println!(
         "Raw [{}]",
         buf[0..n]
@@ -393,9 +638,14 @@ trait DHP2P {
 #[async_trait]
 impl DHP2P for UdpSocket {
     async fn dh_request(&self, path: &str, body: Option<&str>, seq: &mut u32) {
+        // A real DMSS client uses "NFGET"/"NFPOST", not "DHGET"/"DHPOST",
+        // and sends the three extra headers below. Both still work either
+        // way against the servers tested against, but matching what the
+        // real app sends is one less variable when a device/server starts
+        // behaving unexpectedly.
         let method = match body {
-            Some(_) => "DHPOST",
-            None => "DHGET",
+            Some(_) => "NFPOST",
+            None => "NFGET",
         };
 
         let body = match body {
@@ -419,6 +669,9 @@ impl DHP2P for UdpSocket {
 
         let req = format!("\
             {} {} HTTP/1.1\r\n\
+            X-Version: 6.7.15\r\n\
+            X-Sversion: 1.1.0\r\n\
+            X-ToUType: Client/Dmss_Android\r\n\
             CSeq: {}\r\n\
             Authorization: WSSE profile=\"UsernameToken\"\r\n\
             X-WSSE: UsernameToken Username=\"{}\", PasswordDigest=\"{}\", Nonce=\"{}\", Created=\"{}\"\r\n\r\n{}",

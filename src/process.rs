@@ -113,36 +113,69 @@ pub async fn dh_reader(
     conn_channels: Arc<Mutex<HashMap<u32, oneshot::Sender<bool>>>>,
 ) {
     loop {
-        let packet = socket.ptcp_read().await;
-        let packet = session.lock().unwrap().recv(packet);
+        match socket.ptcp_read_or_raw().await {
+            Ok(packet) => {
+                let packet = session.lock().unwrap().recv(packet);
 
-        if let PTCPBody::Empty = packet.body {
-            continue;
-        }
+                if let PTCPBody::Empty = packet.body {
+                    continue;
+                }
 
-        let p = session.lock().unwrap().send(PTCPBody::Empty);
-        socket.ptcp_request(p).await;
+                let p = session.lock().unwrap().send(PTCPBody::Empty);
+                socket.ptcp_request(p).await;
 
-        match packet.body {
-            PTCPBody::Status(realm, status) => {
-                if status == "CONN" {
-                    conn_channels
-                        .lock()
-                        .unwrap()
-                        .remove(&realm)
-                        .unwrap()
-                        .send(true)
-                        .unwrap();
+                match packet.body {
+                    PTCPBody::Status(realm, status) => {
+                        if status == "CONN" {
+                            conn_channels
+                                .lock()
+                                .unwrap()
+                                .remove(&realm)
+                                .unwrap()
+                                .send(true)
+                                .unwrap();
+                        }
+                    }
+                    PTCPBody::Payload(p) => {
+                        let tx = channels.lock().unwrap().get(&p.realm).unwrap().clone();
+
+                        if tx.send(p.data).await.is_err() {
+                            println!("Realm {:08x} unavailable", p.realm);
+                        }
+                    }
+                    _ => {}
                 }
             }
-            PTCPBody::Payload(p) => {
-                let tx = channels.lock().unwrap().get(&p.realm).unwrap().clone();
-
-                if tx.send(p.data).await.is_err() {
-                    println!("Realm {:08x} unavailable", p.realm);
+            Err(raw) => {
+                // No realm is encoded in this framing (see
+                // ptcp_read_or_raw), so route it to whichever single realm
+                // is currently active; ambiguous with more than one
+                // connection open at once, so log and drop rather than
+                // guess wrong.
+                let target = {
+                    let map = channels.lock().unwrap();
+                    if map.len() == 1 {
+                        map.values().next().cloned()
+                    } else {
+                        None
+                    }
+                };
+                match target {
+                    Some(tx) => {
+                        if tx.send(raw).await.is_err() {
+                            println!("Raw payload: realm unavailable");
+                        }
+                    }
+                    None => {
+                        let n = channels.lock().unwrap().len();
+                        println!(
+                            "Raw payload ({} bytes) with {} active realm(s) -- ambiguous, dropped",
+                            raw.len(),
+                            n
+                        );
+                    }
                 }
             }
-            _ => {}
         }
     }
 }
