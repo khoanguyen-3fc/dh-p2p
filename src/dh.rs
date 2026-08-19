@@ -106,8 +106,18 @@ pub async fn p2p_handshake(
 
     let mut res = socket.dh_read_raw().await;
 
-    if res.code == 100 {
+    // A busy P2P server can emit more than one provisional response before
+    // returning the device NAT information. Keep reading a small, bounded
+    // number of responses instead of trying to parse a 100 body as device data.
+    for _ in 0..4 {
+        if res.code >= 200 {
+            break;
+        }
         res = socket.dh_read_raw().await;
+    }
+
+    if res.code < 200 {
+        panic!("Too many provisional responses while creating P2P channel");
     }
 
     if res.code >= 400 {
