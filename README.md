@@ -36,9 +36,16 @@ Arguments:
 
 Options:
   -p, --port <[bind_address:]port:remote_port>
-          Bind address, port and remote port. Default: 127.0.0.1:1554:554
+          Bind address, port and remote port. Repeat for multiple mappings
   -h, --help
           Print help
+```
+
+When `--port` is omitted, the default mapping is `127.0.0.1:1554:554`.
+Multiple device ports can share one P2P session by repeating the option:
+
+```bash
+dh-p2p --port 127.0.0.1:18080:80 --port 127.0.0.1:1554:554 [CAMERA_SERIAL]
 ```
 
 ## Python implementation
