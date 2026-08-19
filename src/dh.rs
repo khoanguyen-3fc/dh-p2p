@@ -143,7 +143,22 @@ pub async fn p2p_handshake(
     let mut session = PTCPSession::new();
 
     socket2.ptcp_request(session.send(PTCPBody::Sync)).await;
-    session.recv(socket2.ptcp_read().await);
+    loop {
+        let packet = session.recv(socket2.ptcp_read().await);
+
+        if packet.is_duplicate() {
+            if !matches!(&packet.body, PTCPBody::Empty) {
+                socket2.ptcp_request(session.send(PTCPBody::Empty)).await;
+            }
+            continue;
+        }
+
+        match packet.body {
+            PTCPBody::Sync => break,
+            PTCPBody::Empty => {}
+            _ => socket2.ptcp_request(session.send(PTCPBody::Empty)).await,
+        }
+    }
 
     if relay_mode {
         return (socket2, session);
@@ -154,15 +169,23 @@ pub async fn p2p_handshake(
             b"\x17\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
         )))
         .await;
-    let mut res = session.recv(socket2.ptcp_read().await);
+    let sign = loop {
+        let packet = session.recv(socket2.ptcp_read().await);
 
-    while let PTCPBody::Empty = res.body {
-        res = session.recv(socket2.ptcp_read().await);
-    }
+        if packet.is_duplicate() {
+            if !matches!(&packet.body, PTCPBody::Empty) {
+                socket2.ptcp_request(session.send(PTCPBody::Empty)).await;
+            }
+            continue;
+        }
 
-    let sign = match res.body {
-        PTCPBody::Command(ref c) => &c[12..],
-        _ => panic!("Invalid response"),
+        match packet.body {
+            PTCPBody::Command(c) if c.first() == Some(&0x18) && c.len() >= 16 => {
+                break c[12..].to_vec()
+            }
+            PTCPBody::Empty => {}
+            _ => socket2.ptcp_request(session.send(PTCPBody::Empty)).await,
+        }
     };
 
     println!(
@@ -263,30 +286,50 @@ pub async fn p2p_handshake(
     let mut session = PTCPSession::new();
 
     socket.ptcp_request(session.send(PTCPBody::Sync)).await;
-    let mut res = session.recv(socket.ptcp_read().await);
-    assert!(matches!(res.body, PTCPBody::Sync), "Invalid response");
+    loop {
+        let packet = session.recv(socket.ptcp_read().await);
+
+        if packet.is_duplicate() {
+            if !matches!(&packet.body, PTCPBody::Empty) {
+                socket.ptcp_request(session.send(PTCPBody::Empty)).await;
+            }
+            continue;
+        }
+
+        match packet.body {
+            PTCPBody::Sync => break,
+            PTCPBody::Empty => {}
+            _ => socket.ptcp_request(session.send(PTCPBody::Empty)).await,
+        }
+    }
 
     socket
         .ptcp_request(
             session.send(PTCPBody::Command(
                 [
                     b"\x19\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
-                    sign.to_vec(),
+                    sign,
                 ]
                 .concat(),
             )),
         )
         .await;
 
-    res = session.recv(socket.ptcp_read().await);
-    while let PTCPBody::Empty = res.body {
-        res = session.recv(socket.ptcp_read().await);
-    }
-    match res.body {
-        PTCPBody::Command(ref c) => {
-            assert_eq!(c[0], 0x1A, "Invalid response");
+    loop {
+        let packet = session.recv(socket.ptcp_read().await);
+
+        if packet.is_duplicate() {
+            if !matches!(&packet.body, PTCPBody::Empty) {
+                socket.ptcp_request(session.send(PTCPBody::Empty)).await;
+            }
+            continue;
         }
-        _ => panic!("Invalid response"),
+
+        match packet.body {
+            PTCPBody::Command(c) if c.first() == Some(&0x1A) => break,
+            PTCPBody::Empty => {}
+            _ => socket.ptcp_request(session.send(PTCPBody::Empty)).await,
+        }
     }
 
     socket
@@ -294,9 +337,21 @@ pub async fn p2p_handshake(
             b"\x1b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec(),
         )))
         .await;
-    res = session.recv(socket.ptcp_read().await);
+    loop {
+        let packet = session.recv(socket.ptcp_read().await);
 
-    assert!(matches!(res.body, PTCPBody::Empty), "Invalid response");
+        if packet.is_duplicate() {
+            if !matches!(&packet.body, PTCPBody::Empty) {
+                socket.ptcp_request(session.send(PTCPBody::Empty)).await;
+            }
+            continue;
+        }
+
+        match packet.body {
+            PTCPBody::Empty => break,
+            _ => socket.ptcp_request(session.send(PTCPBody::Empty)).await,
+        }
+    }
 
     (socket, session)
 }

@@ -5,7 +5,8 @@ use std::{
 };
 use tokio::{
     net::{TcpListener, UdpSocket},
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Semaphore},
+    time::{timeout, Duration},
 };
 
 use crate::{
@@ -67,6 +68,8 @@ async fn main() {
 
     let channels = Arc::new(Mutex::new(HashMap::<u32, mpsc::Sender<Vec<u8>>>::new()));
     let conn_channels = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<bool>>::new()));
+    let disconnect_channels = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<()>>::new()));
+    let realm_gate = Arc::new(Semaphore::new(1));
 
     println!("PTCP session established");
 
@@ -80,21 +83,41 @@ async fn main() {
     let session2 = session.clone();
     let channels2 = channels.clone();
     let conn_channels2 = conn_channels.clone();
+    let disconnect_channels2 = disconnect_channels.clone();
+    let writer_channels = channels.clone();
+    let writer_conn_channels = conn_channels.clone();
 
     let hb_tx = dh_tx.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            hb_tx.send(PTCPEvent::Heartbeat).await.unwrap();
+            if hb_tx.send(PTCPEvent::Heartbeat).await.is_err() {
+                break;
+            }
         }
     });
 
     tokio::spawn(async move {
-        dh_writer(session, writer, dh_rx, remote_port.into()).await;
+        dh_writer(
+            session,
+            writer,
+            dh_rx,
+            remote_port.into(),
+            writer_channels,
+            writer_conn_channels,
+        )
+        .await;
     });
 
     tokio::spawn(async move {
-        dh_reader(session2, reader, channels, conn_channels).await;
+        dh_reader(
+            session2,
+            reader,
+            channels,
+            conn_channels,
+            disconnect_channels,
+        )
+        .await;
     });
 
     println!("Ready to connect!");
@@ -114,9 +137,14 @@ async fn main() {
         let (client, addr) = listener.accept().await.unwrap();
         println!("Accepted connection from {}", addr);
 
+        // Dahua closes each bound realm independently. Do not bind the next
+        // client until the previous realm has acknowledged its disconnect.
+        let realm_permit = realm_gate.clone().acquire_owned().await.unwrap();
+
         // Create a channel for the client
         let (tx, rx) = mpsc::channel::<Vec<u8>>(128);
-        let (conn_tx, conn_rx) = oneshot::channel::<bool>();
+        let (conn_tx, mut conn_rx) = oneshot::channel::<bool>();
+        let (disconnect_tx, disconnect_rx) = oneshot::channel::<()>();
         let dh_tx = dh_tx.clone();
 
         let realm_id = rand::random::<u32>();
@@ -124,14 +152,61 @@ async fn main() {
         // Store the channel in the map
         channels2.lock().unwrap().insert(realm_id, tx);
         conn_channels2.lock().unwrap().insert(realm_id, conn_tx);
+        disconnect_channels2
+            .lock()
+            .unwrap()
+            .insert(realm_id, disconnect_tx);
 
-        dh_tx.send(PTCPEvent::Connect(realm_id)).await.unwrap();
-        conn_rx.await.unwrap();
+        let mut connected = false;
+        for attempt in 1..=3 {
+            if dh_tx.send(PTCPEvent::Connect(realm_id)).await.is_err() {
+                channels2.lock().unwrap().remove(&realm_id);
+                conn_channels2.lock().unwrap().remove(&realm_id);
+                disconnect_channels2.lock().unwrap().remove(&realm_id);
+                return;
+            }
+
+            match timeout(Duration::from_secs(5), &mut conn_rx).await {
+                Ok(Ok(true)) => {
+                    connected = true;
+                    break;
+                }
+                Ok(_) => break,
+                Err(_) if attempt < 3 => {
+                    eprintln!(
+                        "Retrying bind for realm {:08x} ({}/3)",
+                        realm_id,
+                        attempt + 1
+                    );
+                }
+                Err(_) => {}
+            }
+        }
+
+        if !connected {
+            eprintln!("Timed out binding realm {:08x}", realm_id);
+            channels2.lock().unwrap().remove(&realm_id);
+            conn_channels2.lock().unwrap().remove(&realm_id);
+            disconnect_channels2.lock().unwrap().remove(&realm_id);
+            let _ = dh_tx.send(PTCPEvent::Disconnect(realm_id)).await;
+            continue;
+        }
 
         let (reader, writer) = client.into_split();
 
+        let realm_disconnect_channels = disconnect_channels2.clone();
         tokio::spawn(async move {
             process_reader(reader, realm_id, dh_tx).await;
+
+            if timeout(Duration::from_secs(2), disconnect_rx)
+                .await
+                .is_err()
+            {
+                realm_disconnect_channels.lock().unwrap().remove(&realm_id);
+                eprintln!("Timed out disconnecting realm {:08x}", realm_id);
+            }
+
+            drop(realm_permit);
         });
 
         tokio::spawn(async move {
