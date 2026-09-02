@@ -14,6 +14,7 @@ use crate::{
     ptcp::PTCPEvent,
 };
 
+mod auth;
 mod dh;
 mod process;
 mod ptcp;
@@ -27,6 +28,12 @@ struct Cli {
     /// Relay mode (experimental)
     #[arg(short, long)]
     relay: bool,
+    /// Username of the camera, for devices that require authentication
+    #[arg(short, long)]
+    username: Option<String>,
+    /// Password of the camera
+    #[arg(short = 'P', long)]
+    password: Option<String>,
     /// Serial number of the camera
     serial: String,
 }
@@ -60,7 +67,8 @@ async fn main() {
 
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
 
-    let (socket, session) = p2p_handshake(socket, serial, args.relay).await;
+    let (socket, session) =
+        p2p_handshake(socket, serial, args.relay, args.username, args.password).await;
 
     let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
     let session = Arc::new(Mutex::new(session));
