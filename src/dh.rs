@@ -5,6 +5,7 @@ use std::{collections::HashMap, net::SocketAddrV4};
 use tokio::{net::UdpSocket, time};
 use xml::reader::{EventReader, XmlEvent};
 
+use crate::auth;
 use crate::ptcp::{PTCPBody, PTCPSession, PTCP};
 
 static MAIN_SERVER: &str = "www.easy4ipcloud.com:8800";
@@ -28,6 +29,8 @@ pub async fn p2p_handshake(
     socket: UdpSocket,
     serial: String,
     relay_mode: bool,
+    username: Option<String>,
+    password: Option<String>,
 ) -> (UdpSocket, PTCPSession) {
     let mut cseq = 0;
 
@@ -60,28 +63,56 @@ pub async fn p2p_handshake(
         .await;
     socket2.dh_read().await;
 
-    /*
-    TODO add support for device info request
-    socket2
-        .dh_request(
-            format!("/info/device/{}", serial).as_ref(),
-            None,
-            &mut cseq,
-        )
-        .await;
-    socket2.dh_read().await;
-    */
+    // The salt this returns is only needed to sign the channel request, so a
+    // device that will not answer must not take the whole handshake down: an
+    // empty salt is a valid state and the signature is built without one.
+    let salt = if username.is_some() {
+        socket2
+            .dh_request(format!("/info/device/{}", serial).as_ref(), None, &mut cseq)
+            .await;
+        let info = socket2.dh_read_raw().await;
+        match info.body {
+            Some(body) => {
+                auth::device_salt(body.get("body/Info").map(String::as_str).unwrap_or(""))
+            }
+            None => String::new(),
+        }
+    } else {
+        String::new()
+    };
 
     let cid: [u8; 8] = rand::random();
+    let identify = cid
+        .iter()
+        .map(|b| format!("{:x}", b))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let local_addr = format!("127.0.0.1:{}", socket.local_addr().unwrap().port());
+
+    // With credentials the address is encrypted and the request signed; without
+    // them it goes in the clear, which devices with no password still accept.
+    let channel_body = match (&username, &password) {
+        (Some(user), Some(pass)) => {
+            let key = auth::device_key(user, pass, &salt);
+            let nonce: u32 = rand::random::<u32>() & 0x7fff_ffff;
+            let encrypted = auth::encrypt_addr(&key, nonce, &local_addr);
+            let created = chrono::Utc::now().timestamp();
+            let block = auth::auth_block(user, &key, nonce, &salt, &encrypted, created);
+            format!(
+                "<body>{}<Identify>{}</Identify><IpEncrptV2>true</IpEncrptV2><LocalAddr>{}</LocalAddr><version>5.0.0</version></body>",
+                block, identify, encrypted
+            )
+        }
+        _ => format!(
+            "<body><Identify>{}</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>{}</LocalAddr><version>5.0.0</version></body>",
+            identify, local_addr
+        ),
+    };
 
     socket
         .dh_request(
             format!("/device/{}/p2p-channel", serial).as_ref(),
-            Some(format!(
-                "<body><Identify>{}</Identify><IpEncrpt>true</IpEncrpt><LocalAddr>127.0.0.1:{}</LocalAddr><version>5.0.0</version></body>",
-                cid.iter().map(|b| format!("{:x}", b)).collect::<Vec<_>>().join(" "),
-                socket.local_addr().unwrap().port(),
-            ).as_ref()),
+            Some(channel_body.as_ref()),
             &mut cseq,
         )
         .await;
@@ -112,8 +143,8 @@ pub async fn p2p_handshake(
 
     if res.code >= 400 {
         if res.code == 403 {
-            println!("Device requires authentication when creating P2P channel.");
-            println!("Authentication is not supported at this time.");
+            println!("Device rejected the P2P channel request: {}", res.status);
+            println!("Pass the device's username and password with -u and -p.");
         }
 
         panic!("Error response: {}", res.status);
